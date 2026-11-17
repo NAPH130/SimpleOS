@@ -11,18 +11,19 @@ SimpleOS 是一个面向操作系统课程实践的教学项目，计划通过�
 ## 项目目录
 
 ```text
-boot/          引导配置与启动入口
-arch/x86_64/   x86_64 架构相关机制
-kernel/        内核初始化及核心服务
-drivers/       设备驱动
-mm/            内存管理
-task/          任务、进程及调度
-sync/          同步机制
-fs/            文件系统
-loader/        用户程序装载
-lib/           内核基础工具
+src/           项目源码
+  boot/        引导配置与启动入口
+  arch/x86_64/ x86_64 架构相关机制
+  kernel/      内核初始化及核心服务
+  drivers/     设备驱动
+  mm/          内存管理
+  task/        任务、进程及调度
+  sync/        同步机制
+  fs/          文件系统
+  loader/      用户程序装载
+  lib/         内核基础工具
+  user/        用户态基础库与应用
 include/       各模块头文件
-user/          用户态基础库与应用
 tests/         各子系统的功能测试
 scripts/       构建、运行及调试辅助脚本
 docs/          项目需求、设计和结构说明
