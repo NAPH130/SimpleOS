@@ -1,0 +1,9 @@
+# 本地构建产物
+/build/
+
+# 编辑器和系统生成的临时文件
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
