@@ -31,6 +31,14 @@ static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
         asm volatile("mov %%cr2, %0" : "=r"(fault_address));
     }
 
+    // CPU 保存的 CS 低两位给出异常发生前的特权级，frame 的地址给出实际使用的内核栈。
+    if ((frame.cs & 3) == 3) {
+        kprintf_log(LogLevel::DEBUG, "Ring 3 trap: CS=0x%x, SS=0x%x, RSP=%p, on RSP0 stack=%s.\n",
+                    static_cast<unsigned>(frame.cs), static_cast<unsigned>(frame.ss),
+                    reinterpret_cast<void*>(frame.rsp),
+                    on_ring0_entry_stack(&frame, sizeof(frame)) ? "yes" : "no");
+    }
+
     const auto error = static_cast<unsigned>(frame.error_code);
     void* const rip = reinterpret_cast<void*>(frame.rip);
     const char* name = exception_names[vector];

@@ -50,7 +50,7 @@ SimpleOS 从虚拟机启动，入口是 `kernel_main()`。它使用 **freestandi
 
 ### TSS 提供进内核时可用的栈
 
-设想将来 Ring 3 程序触发一个指向 Ring 0 的普通中断门。CPU 要保存用户执行现场，用户栈也可能正是访问出错的地方。在门未选择 IST 栈的情况下，CPU 从 TSS 的 `RSP0` 取得内核栈顶，换到那里再保存现场。SimpleOS 已把 `tss.rsp[0]` 指向 16 KiB 的 `ring0_entry_stack` 末尾，首次 Ring 3 换栈仍待验证。 [TSS 初始化](../../src/arch/x86_64/gdt.cpp) · [Trap 开发计划](../plan/trap.md)
+Ring 3 程序触发异常后，普通中断门可以把执行切到 Ring 0。CPU 要保存用户执行现场，用户栈也可能正是访问出错的地方。在门未选择 IST 栈的情况下，CPU 从 TSS 的 `RSP0` 取得内核栈顶，换到那里再保存现场。SimpleOS 把 `tss.rsp[0]` 指向 16 KiB 的 `ring0_entry_stack` 末尾。`make test-ring3` 可以观察这次换栈。 [TSS 初始化](../../src/arch/x86_64/gdt.cpp) · [运行与验证](getting-started.md)
 
 双重故障 `#DF` 走另一条选栈路径。它的 IDT 门设置了 `IST=1`，CPU 从 TSS 的第一个 IST 表项取一个独立的应急栈，即使事件发生时已经在 Ring 0 也会换栈。这个路径已用 `make test-df` 验证。正常启动的内核态 `int3` 保持 Ring 0，门的 IST 为 0，继续使用当前内核栈。 [IDT 初始化](../../src/arch/x86_64/idt.cpp) · [Trap 功能介绍](../architecture/trap.md)
 
@@ -71,10 +71,10 @@ SimpleOS 从虚拟机启动，入口是 `kernel_main()`。它使用 **freestandi
 
 ## 5. 怎样从这里走到第一个用户程序
 
-SimpleOS 已经能启动并在 Ring 0 处理异常，也为 Ring 3 配好了段和内核入口栈。接下来的验收目标是让一个很小的程序在 Ring 3 运行，让它请求内核写出一行文字，然后退出。这个目标把课本里的地址空间、特权转换和系统调用串在一起。 [Trap 开发计划](../plan/trap.md)
+SimpleOS 的独立自检已经能执行两条 Ring 3 指令。下面的前两步对应当前自检。后两步是系统调用阶段的目标，让用户程序请求内核写出一行文字，然后退出。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp) · [Trap 开发计划](../plan/trap.md)
 
-1. **准备指令和栈。** 内核准备用户代码页和用户栈页，让 CPU 可以在 Ring 3 从代码页取指、使用栈页上的数据。物理页框提供存储，页表把选定的用户虚拟地址映射到这些物理页框并记录访问权限。
-2. **第一次进入 Ring 3。** 内核主动在自己的栈上构造一份 `iretq` 可读的返回现场。它填入用户代码入口作为 `RIP`，用户栈顶作为 `RSP`，以及用户 `CS`、`SS` 和所需的 `RFLAGS`。执行 `iretq` 后，CPU 依照这些值进入 Ring 3。这一步复用了异常返回指令，所用的现场由内核为新程序构造。
+1. **准备指令和栈。** 自检镜像预留独立的代码页和栈页，并通过页表把它们映射到用户虚拟地址 `0x400000` 和 `0x401000`。页表记录访问权限，Ring 3 可以从代码页取指，也可以向栈页写入数据。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp)
+2. **第一次进入 Ring 3。** `enter_user_mode()` 在内核栈上填好用户 `RIP`、`RSP`、`CS`、`SS` 和 `RFLAGS`，再用异常返回指令 `iretq` 读取这份现场。CPU 依照这些值进入 Ring 3，执行 `pushq` 和 `ud2`。随后 CPU 递送 `#UD`，使用 TSS 的 `RSP0` 换回内核栈。 [用户态入口汇编](../../src/arch/x86_64/enter_user_mode.S)
 3. **用户程序发出系统调用。** 按项目计划，用户程序把调用号和参数按约定放入寄存器，然后执行 `int 0x80`。对应的 IDT 门需要设为 `DPL=3`，允许 Ring 3 用这条指令进入，门的目标代码段仍然是 Ring 0。CPU 使用 TSS 的 `RSP0` 换栈并保存用户现场，汇编再把现场交给内核分发。 [系统调用接口](../../include/kernel/syscall.hpp) · [Trap 开发计划](../plan/trap.md)
 4. **内核执行服务并返回。** 以计划中的 `sys_write` 为例，内核通过约定的寄存器取得字符串地址和长度，检查用户缓冲区可读，再从内核侧输出。分发器可把返回值写入现场中约定的寄存器字段，汇编恢复寄存器时将它带回用户程序。此时 `iretq` 使用的是 CPU 在系统调用入口保存的用户返回现场。用户程序继续执行，最后调用 `sys_exit` 结束。
 
@@ -90,12 +90,12 @@ SimpleOS 已经能启动并在 Ring 0 处理异常，也为 Ring 3 配好了段�
 | 锁和信号量 | 保护共享数据。自旋锁用原子操作竞争锁，阻塞式互斥锁和信号量需要任务等待与唤醒。 | 两个任务反复更新同一个余额，运行结果符合预期。 [同步接口](../../include/sync/primitives.hpp) |
 | 文件系统和程序装载 | 文件系统提供读取接口。装载器读取 ELF 程序头，准备代码和数据映射，再从 ELF 入口启动用户程序。 | 先读出一个文件，再从文件装载并运行用户程序。 [文件系统接口](../../include/fs/vfs.hpp) · [ELF 装载接口](../../include/loader/elf.hpp) |
 
-这些功能有各自的依赖。第一次进用户态需要先有可用的页和映射，可以先用一小段测试代码验证。完整的 ELF 装载器需要读取文件并按程序头组织映射，适合在用户态路径跑通后接入。定时器中断也可以先单独验证，让处理函数每次中断只增加计数，等任务切换跑通后再用于抢占。 [开发路线与阶段验收](../plan/roadmap.md) · [Trap 开发计划](../plan/trap.md)
+这些功能有各自的依赖。当前自检使用预留页验证了用户态入口。以后运行从文件装载的程序时，ELF 装载器会为程序段动态建立映射。定时器中断也可以先单独验证，让处理函数每次中断只增加计数，等任务切换跑通后再用于抢占。 [开发路线与阶段验收](../plan/roadmap.md) · [Trap 开发计划](../plan/trap.md)
 
 ## 7. 用现有实验练习读代码
 
 1. **跟一次正常返回。** 执行 `make test-boot`，打开 `build/boot-test.log`，找到三条和断点有关的 DEBUG 日志。沿着 `kernel_main()` → `idt.cpp` → `trap_entry.S` → `trap_dispatch()` → `iretq` 找到每次交接发生的位置。从最后一条 `after int3` 反推 CPU 最后恢复了哪个执行地址。
 2. **区分执行地址和访问地址。** 执行 `make test-pf`，打开 `build/tests/trap-pf.log`，在 `#PF` 日志里圈出 `RIP` 和 `CR2`。和测试里打印的 `before unmapped read` 对照，确认一个对应读取指令，一个对应 `0x1000`。
-3. **找出两个栈的用途。** 执行 `make test-df`，在 `build/tests/trap-df.log` 中查找 `IST=yes`。对照 `gdt.cpp` 和 `idt.cpp`，找出 `RSP0` 指向的入口栈，以及第 8 号向量选用的 IST 应急栈。 [运行命令及日志位置](getting-started.md) · [双重故障测试源码](../../tests/trap/df_test.cpp)
+3. **观察两种内核换栈。** 执行 `make test-df`，查看第 8 号向量选用的应急栈对应的 `IST=yes`。再执行 `make test-ring3`，在 `build/tests/trap-ring3.log` 中找到 `on RSP0 stack=yes`。对照 `gdt.cpp` 找到两块栈的地址分别写到了 TSS 的哪里。 [运行命令及日志位置](getting-started.md) · [GDT 和 TSS](../../src/arch/x86_64/gdt.cpp)
 
 读完这几段后，可以用同样的办法读新模块。先确定硬件或前一个模块会提供什么，再找 C++ 中的接口和数据，最后用可观察的日志或测试检查这条路径是否走通。

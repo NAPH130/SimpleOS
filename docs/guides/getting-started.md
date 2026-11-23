@@ -35,6 +35,15 @@ sudo apt install build-essential git xorriso qemu-system-x86
 | `make test-gp` | 只运行 `#GP` 自检，验证第 13 号异常的故障地址和非零硬件错误码。 |
 | `make test-pf` | 核对缺页异常的 `CR2`、`RIP` 和错误码。 |
 | `make test-de`、`make test-ss`、`make test-df` | 分别验证除零、栈段和双重故障，`#DF` 日志确认应急栈。 |
+| `make test-ring3` | 在独立镜像中启动用户态测试代码，验证用户栈写入、`#UD` 和内核入口换栈。 |
 | `make clean` | 删除 `build/`，包括引导器缓存和测试日志。 |
 
 每个 QEMU 自检会在约 15 秒后结束，再检查串口内容。正常启动记录保存在 `build/boot-test.log`，故障自检记录在 `build/tests/trap-<异常名>.log`，例如 `build/tests/trap-pf.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)
+
+Ring 3 自检的日志在 `build/tests/trap-ring3.log`。其中 `RSP` 是用户栈顶，`on RSP0 stack=yes` 表示异常现场落在内核入口栈。
+
+```text
+[DEBUG] before entering Ring 3, expected RIP=0x400002, RSP=0x401ff8
+[DEBUG] Ring 3 trap: CS=0x2b, SS=0x33, RSP=0x401ff8, on RSP0 stack=yes.
+[ERROR] #UD Invalid opcode (vector 6), RIP=0x400002. Halting CPU.
+```

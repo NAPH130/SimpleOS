@@ -71,3 +71,9 @@ bool x86_64::on_double_fault_stack(const void* address) {
     return reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(double_fault_stack)
         < sizeof(double_fault_stack);
 }
+
+bool x86_64::on_ring0_entry_stack(const void* address, size_t size) {
+    const auto offset =
+        reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(ring0_entry_stack);
+    return size <= sizeof(ring0_entry_stack) && offset <= sizeof(ring0_entry_stack) - size;
+}

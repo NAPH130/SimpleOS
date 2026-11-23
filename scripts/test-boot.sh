@@ -9,7 +9,7 @@ case "$scenario" in
         image=$build_dir/simpleos.iso
         log=$build_dir/boot-test.log
         ;;
-    ud|gp|pf|de|ss|df)
+    ud|gp|pf|de|ss|df|ring3)
         image=$build_dir/tests/trap-$scenario.iso
         log=$build_dir/tests/trap-$scenario.log
         ;;
@@ -68,6 +68,16 @@ if [ "$scenario" != boot ]; then
         df)
             exception='#DF'
             expected_logs=$(printf '[\033[34mDEBUG\033[0m] before general protection fault with absent gate\r\n[\033[31mERROR\033[0m] #DF Double fault (vector 8), error=0x0, IST=yes. Halting CPU.\r\n')
+            ;;
+        ring3)
+            exception='Ring 3 #UD'
+            fields=$(sed -n '1s/.*before entering Ring 3, expected RIP=\(0x[0-9a-f][0-9a-f]*\), RSP=\(0x[0-9a-f][0-9a-f]*\).*/\1 \2/p' "$log")
+            rip=${fields%% *}
+            rsp=${fields#* }
+            expected_logs=$(printf '[\033[%sm%s\033[0m] %s\r\n' \
+                34 DEBUG "before entering Ring 3, expected RIP=$rip, RSP=$rsp" \
+                34 DEBUG "Ring 3 trap: CS=0x2b, SS=0x33, RSP=$rsp, on RSP0 stack=yes." \
+                31 ERROR "#UD Invalid opcode (vector 6), RIP=$rip. Halting CPU.")
             ;;
     esac
     if [ -z "$rip" ] || [ "$(cat "$log")" != "$expected_logs" ]; then

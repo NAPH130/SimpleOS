@@ -12,10 +12,11 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
     src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp src/arch/x86_64/trap.cpp
-ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S
+ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S \
+    src/arch/x86_64/enter_user_mode.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
     $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
-TRAP_TESTS := ud gp pf de ss df
+TRAP_TESTS := ud gp pf de ss df ring3
 TRAP_TEST_OBJECTS := $(TRAP_TESTS:%=$(BUILD)/tests/trap/%_test.o)
 TRAP_TEST_ELFS := $(TRAP_TESTS:%=$(BUILD)/tests/trap-%.elf)
 TRAP_TEST_ISOS := $(TRAP_TEST_ELFS:.elf=.iso)

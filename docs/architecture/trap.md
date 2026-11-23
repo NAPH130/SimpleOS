@@ -1,6 +1,6 @@
 # Trap 功能介绍
 
-Trap 模块负责内核运行时的 CPU 异常处理。CPU 发现异常后，通过中断描述符表（IDT）找到入口。内核保存执行现场，根据异常类型处理，再决定是否恢复原来的执行。SimpleOS 当前为内核态的 `0–31` 号向量安装了入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余向量走诊断停机路径。
+Trap 模块负责内核运行时的 CPU 异常处理。CPU 发现异常后，通过中断描述符表（IDT）找到入口。内核保存执行现场，根据异常类型处理，再决定是否恢复原来的执行。SimpleOS 为 `0–31` 号向量安装了指向 Ring 0 的入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余向量走诊断停机路径。
 
 ## 运行中何时会进入 Trap
 
@@ -44,8 +44,12 @@ flowchart TD
 
 ## Ring 3 的描述符与内核入口栈
 
-GDT 的第 5、6 项是 Ring 3 的代码段和可写数据段，对应选择子 `0x2b` 和 `0x33`。选择子高位给出表项索引，低两位的 `3` 表示请求的特权级。等实现 `enter_user_mode()` 时，这两个选择子将分别用于返回现场的 `CS` 和 `SS`。 [段选择子](../../include/arch/x86_64/segments.h) · [GDT 初始化](../../src/arch/x86_64/gdt.cpp)
+GDT 的第 5、6 项是 Ring 3 的代码段和可写数据段，对应选择子 `0x2b` 和 `0x33`。选择子高位给出表项索引，低两位的 `3` 表示请求的特权级。`enter_user_mode()` 分别将这两个选择子用作返回现场的 `CS` 和 `SS`，再加入用户入口地址、用户栈顶和 `RFLAGS`。CPU 通过 `iretq` 读取这些值，从指定地址开始以 Ring 3 权限执行。此时 `IF=0`，可屏蔽中断保持关闭。 [段选择子](../../include/arch/x86_64/segments.h) · [用户态入口汇编](../../src/arch/x86_64/enter_user_mode.S)
 
-`initialize_segments()` 将独立的 16 KiB 内核入口栈的顶部地址写入 `tss.rsp[0]`。将来普通异常门或系统调用门把 Ring 3 切入 Ring 0 时，CPU 可从这个 `RSP0` 得到内核栈顶，再把用户态返回现场压到栈上。`#DF` 继续从 `IST[1]` 取得自己的应急栈。GDT 和 TSS 分别通过 `lgdt` 和 `ltr` 加载。 [GDT 与栈配置](../../src/arch/x86_64/gdt.cpp) · [描述符加载汇编](../../src/arch/x86_64/gdt_load.S) · [Intel 系统编程手册](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+`initialize_segments()` 将独立的 16 KiB 内核入口栈的顶部地址写入 `tss.rsp[0]`。用户态异常通过普通异常门切到 Ring 0 时，CPU 从这个 `RSP0` 得到内核栈顶，再把用户态返回现场压到栈上。`#DF` 则使用第一个 IST 表项指定的应急栈。GDT 和 TSS 分别通过 `lgdt` 和 `ltr` 加载。 [GDT 与栈配置](../../src/arch/x86_64/gdt.cpp) · [描述符加载汇编](../../src/arch/x86_64/gdt_load.S) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
-缺页恢复、首次进入 Ring 3、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。QEMU 自检命令和日志位置见 [构建、运行与验证](../guides/getting-started.md)。
+`make test-ring3` 在独立镜像中添加了两张 4 KiB 用户页的映射。代码页从 `0x400000` 起，可读、可执行。栈页从 `0x401000` 起，可读写，开启 NX 时禁止执行。自检复用 Limine 的四级页表，在空闲的低地址表项下接入测试页，保留现有内核映射。用户代码先用 `pushq` 写入自己的栈，再用 `ud2` 触发 CPU 异常。`#UD` 由 CPU 递送，因此使用现有的异常门。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp) · [Limine 引导协议](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md)
+
+日志中的 `CS=0x2b` 和 `SS=0x33` 来自 CPU 保存的用户现场，`RSP=0x401ff8` 对应完成一次 8 字节压栈后的用户栈顶。`on RSP0 stack=yes` 表示整份 `TrapFrame` 位于当前的 16 KiB 内核入口栈内。之后按 `#UD` 的现有诊断流程停机。 [异常诊断实现](../../src/arch/x86_64/trap.cpp) · [构建、运行与验证](../guides/getting-started.md)
+
+缺页恢复、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。
