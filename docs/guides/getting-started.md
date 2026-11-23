@@ -30,7 +30,8 @@ sudo apt install build-essential git xorriso qemu-system-x86
 | --- | --- |
 | `make build` | 编译并链接内核，生成 BIOS 启动镜像。 |
 | `make build/kernel.elf` | 只生成内核 ELF，适合先检查编译和链接。此目标无需下载引导器。 |
-| `make test` | 运行宿主机控制台测试，再启动 QEMU 检查字符画、日志和 `int3` 的返回路径。 |
+| `make test` | 运行宿主机控制台测试、常规 QEMU 启动测试和独立的 `#UD` 自检。 |
+| `make test-ud` | 只运行 `#UD` 自检，验证第 6 号异常的故障地址和停机路径。 |
 | `make clean` | 删除 `build/`，包括引导器缓存和测试日志。 |
 
-启动测试会在约 15 秒后结束 QEMU，再检查串口内容。看到 `Boot test passed.` 就表示检查通过。原始串口记录在 `build/boot-test.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)
+每个 QEMU 自检会在约 15 秒后结束，再检查串口内容。正常启动结果保存在 `build/boot-test.log`，`#UD` 自检结果保存在 `build/tests/trap-ud.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)

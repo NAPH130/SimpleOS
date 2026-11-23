@@ -4,7 +4,7 @@ SimpleOS 是一个面向操作系统课程实践的 x86_64 教学内核，使用
 
 ## 当前状态
 
-当前使用 Limine 在 QEMU BIOS 环境启动，通过 COM1 串口显示字符画和分级日志。内核已实现 `kprintf`、`kprintf_log` 和内核态 `int3` 断点自检，能够进入异常处理并恢复执行。其余子系统的预留接口位于 `include/`。 [内核架构](docs/architecture/overview.md)
+当前使用 Limine 在 QEMU BIOS 环境启动，通过 COM1 串口显示字符画和分级日志。内核已实现 `kprintf`、`kprintf_log`、`int3` 断点返回和 `#UD` 无效指令诊断。其余子系统的预留接口位于 `include/`。 [内核架构](docs/architecture/overview.md)
 
 ## 快速启动
 
@@ -32,4 +32,4 @@ build/     本地生成的镜像、日志及引导器缓存
 
 - 文档目录与维护方式。 [开发文档索引](docs/README.md)
 - `int3`、IDT 和 `TrapFrame` 的实现原理。 [Trap 功能介绍](docs/architecture/trap.md)
-- 下一步的 CPU 异常诊断、用户态系统调用及后续阶段的验收目标。 [开发路线](docs/development/roadmap.md)
+- 接下来的阶段目标和模块待办。 [开发路线](docs/plan/roadmap.md) · [Trap 开发计划](docs/plan/trap.md)

@@ -1,12 +1,19 @@
 #include <arch/x86_64/vectors.h>
 
     .text
-    .global x86_64_breakpoint_entry
-    .type x86_64_breakpoint_entry, @function
-x86_64_breakpoint_entry:
-    # int3 无硬件错误码，补齐 TrapFrame 的错误码和向量号。
+    .macro exception_without_error entry, vector
+    .global \entry
+    .type \entry, @function
+\entry:
+    # 为无硬件错误码的异常补齐错误码和向量号。
     pushq $0
-    pushq $X86_64_VECTOR_BREAKPOINT
+    pushq $\vector
+    jmp .Ltrap_common
+    .size \entry, .-\entry
+    .endm
+
+    exception_without_error x86_64_breakpoint_entry, X86_64_VECTOR_BREAKPOINT
+    exception_without_error x86_64_invalid_opcode_entry, X86_64_VECTOR_INVALID_OPCODE
 
 .Ltrap_common:
     pushq %rax
@@ -52,6 +59,5 @@ x86_64_breakpoint_entry:
     # 跳过向量号和错误码，CPU 恢复余下的返回现场。
     addq $16, %rsp
     iretq
-    .size x86_64_breakpoint_entry, .-x86_64_breakpoint_entry
 
     .section .note.GNU-stack,"",@progbits

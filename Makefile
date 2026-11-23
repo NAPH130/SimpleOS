@@ -15,8 +15,10 @@ SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/dr
 ASM_SOURCES := src/arch/x86_64/trap_entry.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
     $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
+UD_TEST_OBJECT := $(BUILD)/tests/trap/ud_test.o
+UD_TEST_ISO := $(BUILD)/tests/trap-ud.iso
 
-.PHONY: all build run test clean
+.PHONY: all build run test test-boot test-ud clean
 all: build
 build: $(BUILD)/simpleos.iso
 
@@ -28,10 +30,16 @@ $(BUILD)/%.o: src/%.S
 	@mkdir -p $(@D)
 	$(CC) -m64 -g -Iinclude -MMD -MP -c $< -o $@
 
--include $(OBJECTS:.o=.d)
+$(UD_TEST_OBJECT): tests/trap/ud_test.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD)/kernel.elf: $(OBJECTS) linker.ld
-	$(LD) -nostdlib -static -z max-page-size=0x1000 -T linker.ld $(OBJECTS) -o $@
+-include $(OBJECTS:.o=.d) $(UD_TEST_OBJECT:.o=.d)
+
+$(BUILD)/kernel.elf: $(OBJECTS)
+$(BUILD)/tests/trap-ud.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(UD_TEST_OBJECT)
+$(BUILD)/kernel.elf $(BUILD)/tests/trap-ud.elf: linker.ld
+	$(LD) -nostdlib -static -z max-page-size=0x1000 -T linker.ld $(filter %.o,$^) -o $@
 
 # 拉取固定提交，避免上游分支变化导致构建行为改变。
 $(LIMINE)/.ready:
@@ -42,13 +50,15 @@ $(LIMINE)/.ready:
 	$(MAKE) -C $(LIMINE)
 	@touch $@
 
-$(BUILD)/simpleos.iso: $(BUILD)/kernel.elf src/boot/limine.conf $(LIMINE)/.ready
-	@mkdir -p $(BUILD)/iso/boot/limine
-	cp $(BUILD)/kernel.elf $(BUILD)/iso/boot/kernel.elf
-	cp src/boot/limine.conf $(BUILD)/iso/boot/limine/limine.conf
-	cp $(LIMINE)/limine-bios.sys $(LIMINE)/limine-bios-cd.bin $(BUILD)/iso/boot/limine/
+$(BUILD)/simpleos.iso: $(BUILD)/kernel.elf
+$(UD_TEST_ISO): $(BUILD)/tests/trap-ud.elf
+$(BUILD)/simpleos.iso $(UD_TEST_ISO): Makefile src/boot/limine.conf $(LIMINE)/.ready
+	@mkdir -p $(@:.iso=-root)/boot/limine
+	cp $(filter %.elf,$^) $(@:.iso=-root)/boot/kernel.elf
+	cp src/boot/limine.conf $(@:.iso=-root)/boot/limine/limine.conf
+	cp $(LIMINE)/limine-bios.sys $(LIMINE)/limine-bios-cd.bin $(@:.iso=-root)/boot/limine/
 	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
-	    -no-emul-boot -boot-load-size 4 -boot-info-table $(BUILD)/iso -o $@
+	    -no-emul-boot -boot-load-size 4 -boot-info-table $(@:.iso=-root) -o $@
 	$(LIMINE)/limine bios-install $@
 
 run: build
@@ -59,9 +69,14 @@ $(BUILD)/tests/console_test: tests/console/console_test.cpp src/kernel/console.c
 	@mkdir -p $(@D)
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -Iinclude tests/console/console_test.cpp src/kernel/console.cpp -o $@
 
-test: build $(BUILD)/tests/console_test
+test: $(BUILD)/tests/console_test test-boot test-ud
 	$(BUILD)/tests/console_test
-	sh scripts/test-boot.sh
+
+test-boot: build
+	sh scripts/test-boot.sh boot $(BUILD)
+
+test-ud: $(UD_TEST_ISO)
+	sh scripts/test-boot.sh ud $(BUILD)
 
 clean:
 	rm -rf $(BUILD)

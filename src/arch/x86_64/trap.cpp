@@ -17,9 +17,15 @@ extern "C" void trap_dispatch(TrapFrame* frame) {
         return;
     }
 
-    // TODO: 将其他异常、设备中断和系统调用交给对应模块。
-    kprintf_log(LogLevel::ERROR, "Unhandled trap vector %u\n",
-                static_cast<unsigned>(frame->vector));
+    if (frame->vector == X86_64_VECTOR_INVALID_OPCODE) {
+        // #UD 的 RIP 指向出错指令，直接返回会再次触发同一故障。
+        kprintf_log(LogLevel::ERROR, "#UD Invalid opcode (vector %u), RIP=%p. Halting CPU.\n",
+                    static_cast<unsigned>(frame->vector), reinterpret_cast<void*>(frame->rip));
+    } else {
+        // TODO: 将其他异常、设备中断和系统调用交给对应模块。
+        kprintf_log(LogLevel::ERROR, "Unhandled trap vector %u\n",
+                    static_cast<unsigned>(frame->vector));
+    }
     halt();
 }
 
