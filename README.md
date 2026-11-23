@@ -4,7 +4,7 @@ SimpleOS 是一个面向操作系统课程实践的 x86_64 教学内核，使用
 
 ## 当前状态
 
-当前使用 Limine 在 QEMU BIOS 环境启动，通过 COM1 串口显示字符画和分级日志。内核已接入 `0–31` 号异常向量，支持 `int3` 断点返回、缺页诊断和双重故障应急栈。`make test-ring3` 可单独验证首次进入用户态，以及用户异常触发时如何切到内核栈。系统调用等子系统的预留接口位于 `include/`。 [内核架构](docs/architecture/overview.md)
+当前使用 Limine 在 QEMU BIOS 环境启动，通过 COM1 串口显示字符画和分级日志。内核已接入 `0–31` 号异常向量，支持 `int3` 断点返回、缺页诊断和双重故障应急栈。`make test-ring3` 验证用户态异常换栈，`make test-syscall` 验证用户程序通过 `sys_write` 输出并通过 `sys_exit` 结束。 [内核架构](docs/architecture/overview.md)
 
 ## 快速启动
 

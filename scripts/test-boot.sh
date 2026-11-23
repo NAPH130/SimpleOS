@@ -9,7 +9,7 @@ case "$scenario" in
         image=$build_dir/simpleos.iso
         log=$build_dir/boot-test.log
         ;;
-    ud|gp|pf|de|ss|df|ring3)
+    ud|gp|pf|de|ss|df|ring3|syscall)
         image=$build_dir/tests/trap-$scenario.iso
         log=$build_dir/tests/trap-$scenario.log
         ;;
@@ -78,6 +78,10 @@ if [ "$scenario" != boot ]; then
                 34 DEBUG "before entering Ring 3, expected RIP=$rip, RSP=$rsp" \
                 34 DEBUG "Ring 3 trap: CS=0x2b, SS=0x33, RSP=$rsp, on RSP0 stack=yes." \
                 31 ERROR "#UD Invalid opcode (vector 6), RIP=$rip. Halting CPU.")
+            ;;
+        syscall)
+            exception='System call'
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\n')
             ;;
     esac
     if [ -z "$rip" ] || [ "$(cat "$log")" != "$expected_logs" ]; then

@@ -22,7 +22,8 @@ Trap 模块负责把 CPU 异常、已配置设备的硬件中断，以及项目�
 - [x] **为双重故障 `#DF` 配置应急栈。** 加载包含内核段与 TSS 的最小 GDT，并通过 IST 为第 8 号向量切换独立栈。`make test-df` 验证双重故障日志中的 `IST=yes`，普通启动继续回归 `int3`。 [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 - [x] **为 Ring 3 扩展 GDT 和 TSS。** 已加入用户代码段和数据段，`RSP0` 指向独立内核入口栈。`make -j8 test` 回归内核异常路径，在 QEMU 中用 GDB 核对加载的 GDT、任务寄存器、用户段描述符和 `RSP0`。
 - [x] **验证 Ring 3 的首次进入和换栈。** `make test-ring3` 在独立镜像中映射用户代码和栈，通过 `enter_user_mode()` 从 Ring 0 进入 Ring 3。测试代码压栈后触发 `#UD`，脚本核对 `CS=0x2b`、`SS=0x33`、用户栈指针、故障地址和 `on RSP0 stack=yes`。在 QEMU 中用 GDB 读取保存的 `RSP` 指向的内存，确认栈顶值为 `0x2a`。`make -j8 test` 包含此自检。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp)
-- [ ] **接通 Ring 3 的 `int 0x80`。** 为 `0x80` 门设置 `DPL=3`，内核专用门保留 `DPL=0`。约定系统调用号、参数和返回值使用的寄存器，由 Trap 入口把 `TrapFrame` 交给系统调用分发器。验收时运行首个用户程序，通过 `sys_write` 输出文本并返回用户态，再通过 `sys_exit` 结束测试程序。 [系统调用接口](../../include/kernel/syscall.hpp) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+- [x] **接通 Ring 3 的 `int 0x80`。** `make test-syscall` 验证 `sys_write` 的串口输出、返回值与无效参数处理。测试程序继续在 Ring 3 运行，最后用 `sys_exit(42)` 把控制权和状态交回内核启动点。该自检已加入 `make test`。 [调用约定](../../include/abi/syscall.hpp) · [系统调用自检](../../tests/trap/syscall_user.cpp)
+- [ ] **接入任务生命周期。** 调度器就绪后，将 `sys_exit` 接到任务退出与回收路径，并实现 `sys_yield`。
 - [ ] **区分内核态和用户态的致命异常。** 根据保存的 `CS` 判断异常来源。内核态致命异常走诊断停机路径。任务退出机制就绪后，将用户态的致命异常交给任务模块处理。验收时让测试用户程序触发 `#UD`，确认程序退出后内核可以继续运行。
 
 ## 3. 硬件中断与定时器
@@ -32,5 +33,5 @@ Trap 模块负责把 CPU 异常、已配置设备的硬件中断，以及项目�
 
 ## 维护与验收
 
-- 保留 `make test` 的 `int3`、致命异常和 Ring 3 换栈回归。为系统调用和周期 IRQ 加入可重复的 QEMU 自检。对预期停机的自检，核对异常日志和运行结果后再判定通过。
+- 保留 `make test` 的 `int3`、致命异常、Ring 3 换栈和系统调用回归。接入周期 IRQ 时添加可重复的 QEMU 自检。对预期停机的自检，核对异常日志和运行结果后再判定通过。
 - 每完成一项，勾选对应 TODO，写下实际测试命令和观察结果，并更新 [Trap 功能介绍](../architecture/trap.md) 中的当前能力。

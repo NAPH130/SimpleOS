@@ -7,6 +7,7 @@
 #define CPU_EXCEPTION(vector, error, name) extern "C" void x86_64_exception_ ## vector();
 #include <arch/x86_64/exception_vectors.inc>
 #undef CPU_EXCEPTION
+extern "C" void x86_64_syscall_entry();
 
 namespace {
 
@@ -31,15 +32,16 @@ static_assert(sizeof(IdtRegister) == 10);
 
 alignas(16) IdtGate idt[256]{};
 constexpr uint8_t kernel_interrupt_gate = 0x8e; // P=1，DPL=0，64 位中断门。
+constexpr uint8_t user_interrupt_gate = kernel_interrupt_gate | (3 << 5); // DPL=3。
 
-void set_exception_gate(uint8_t vector, void (*handler)(), uint8_t ist) {
+void set_interrupt_gate(uint8_t vector, void (*handler)(), uint8_t ist, uint8_t attributes) {
     const auto entry = reinterpret_cast<uintptr_t>(handler);
     // CPU 触发该向量时，从这三段 offset 字段拼出 64 位入口地址。
     idt[vector] = {
         static_cast<uint16_t>(entry),
         X86_64_KERNEL_CODE_SELECTOR,
         ist,
-        kernel_interrupt_gate,
+        attributes,
         static_cast<uint16_t>(entry >> 16),
         static_cast<uint32_t>(entry >> 32),
         0,
@@ -55,10 +57,13 @@ void x86_64::initialize_traps() {
     // 先准备 IDT 门引用的内核代码段，以及 #DF 使用的 TSS 应急栈。
     initialize_segments();
 #define CPU_EXCEPTION(vector, error, name) \
-    set_exception_gate(vector, x86_64_exception_ ## vector, \
-                       vector == X86_64_VECTOR_DOUBLE_FAULT ? X86_64_DOUBLE_FAULT_IST : 0);
+    set_interrupt_gate(vector, x86_64_exception_ ## vector, \
+                       vector == X86_64_VECTOR_DOUBLE_FAULT ? X86_64_DOUBLE_FAULT_IST : 0, \
+                       kernel_interrupt_gate);
 #include <arch/x86_64/exception_vectors.inc>
 #undef CPU_EXCEPTION
+    // 用户程序可以用 int 0x80 进入内核代码段，CPU 经 TSS 的 RSP0 切到内核栈。
+    set_interrupt_gate(X86_64_VECTOR_SYSCALL, x86_64_syscall_entry, 0, user_interrupt_gate);
     // lidt 把表的起始地址和范围载入 IDTR，后续 CPU 通过向量号索引这张表。
     const IdtRegister idtr{sizeof(idt) - 1, reinterpret_cast<uintptr_t>(idt)};
     asm volatile("lidt %0" : : "m"(idtr) : "memory");

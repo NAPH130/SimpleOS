@@ -15,6 +15,25 @@ volatile uint64_t base_revision[] = {
     0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, 3
 };
 
+struct HhdmResponse {
+    uint64_t revision;
+    uint64_t offset;
+};
+
+struct HhdmRequest {
+    uint64_t id[4];
+    uint64_t revision;
+    const HhdmResponse* response;
+};
+
+// 请求直接映射的偏移，供内核通过物理地址读取页表。
+[[gnu::used, gnu::section(".limine_requests")]]
+volatile HhdmRequest hhdm_request{
+    {0xc7b1dd30df4c8b88, 0x0a82e883a194f07b, 0x48dcf1cb8ad2b852, 0x63984e959a98244b},
+    0,
+    nullptr,
+};
+
 __attribute__((used, section(".limine_requests_end")))
 volatile uint64_t requests_end[] = {
     0xadc0e0531bb10d03, 0x9572709f31764c62
@@ -24,4 +43,13 @@ volatile uint64_t requests_end[] = {
 
 bool boot::limine_base_revision_supported() {
     return base_revision[2] == 0;
+}
+
+bool boot::higher_half_direct_map_offset(uintptr_t& offset) {
+    const auto* response = hhdm_request.response;
+    if (response == nullptr) {
+        return false;
+    }
+    offset = response->offset;
+    return true;
 }

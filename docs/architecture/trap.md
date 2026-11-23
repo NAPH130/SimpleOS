@@ -1,6 +1,6 @@
 # Trap 功能介绍
 
-Trap 模块负责内核运行时的 CPU 异常处理。CPU 发现异常后，通过中断描述符表（IDT）找到入口。内核保存执行现场，根据异常类型处理，再决定是否恢复原来的执行。SimpleOS 为 `0–31` 号向量安装了指向 Ring 0 的入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余向量走诊断停机路径。
+Trap 模块处理 CPU 异常和系统调用。CPU 通过中断描述符表（IDT）找到入口，内核保存执行现场，再分发给对应的处理函数。SimpleOS 为 `0–31` 号异常向量安装了指向 Ring 0 的入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余 CPU 异常走诊断停机路径。用户程序通过 `int 0x80` 请求内核输出或结束执行。
 
 ## 运行中何时会进入 Trap
 
@@ -52,4 +52,15 @@ GDT 的第 5、6 项是 Ring 3 的代码段和可写数据段，对应选择子 
 
 日志中的 `CS=0x2b` 和 `SS=0x33` 来自 CPU 保存的用户现场，`RSP=0x401ff8` 对应完成一次 8 字节压栈后的用户栈顶。`on RSP0 stack=yes` 表示整份 `TrapFrame` 位于当前的 16 KiB 内核入口栈内。之后按 `#UD` 的现有诊断流程停机。 [异常诊断实现](../../src/arch/x86_64/trap.cpp) · [构建、运行与验证](../guides/getting-started.md)
 
-缺页恢复、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。
+## 用户程序怎样调用内核
+
+IDT 的 `0x80` 号门设置为 `DPL=3`，允许用户程序执行 `int 0x80`。门的目标是内核代码段，CPU 使用 `RSP0` 换栈。汇编入口沿用异常的现场布局，再由 `trap_dispatch()` 把 `TrapFrame` 交给系统调用分发器。 [IDT 初始化](../../src/arch/x86_64/idt.cpp) · [汇编入口](../../src/arch/x86_64/trap_entry.S) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+
+| 调用 | `RAX` 调用号 | 参数 | 结果 |
+| --- | --- | --- | --- |
+| `sys_write(fd, buffer, size)` | `1` | `RDI` 是输出目标，`RSI` 是用户地址，`RDX` 是字节数。首版 `fd=1` 对应 COM1。 | 返回 `RAX` 中的字节数或负错误码。 |
+| `sys_exit(status)` | `2` | `RDI` 的低 32 位是退出状态。 | 结束用户执行，由内核取得退出状态。 |
+
+`sys_write` 先检查长度和地址范围，再沿当前页表确认每一页都允许用户访问。发送由串口驱动按字节完成，保留百分号、零字节和原始换行。分发器把结果写进 `TrapFrame::rax`，汇编恢复 `RAX` 后执行 `iretq`，用户程序从 `int 0x80` 后继续。对于有效输出目标，零长度写入返回 `0`。无效输出目标返回 `-9`，无效用户缓冲区返回 `-14`，长度超出返回值范围时返回 `-22`，未知调用号返回 `-38`。 [调用约定](../../include/abi/syscall.hpp) · [用户态封装](../../src/user/syscall.cpp) · [内核分发](../../src/kernel/syscall.cpp) · [页表校验](../../src/arch/x86_64/paging.cpp)
+
+`run_user_mode()` 在启动单个用户程序时保存内核栈和调用者需要保留的寄存器。`sys_exit` 恢复这份内核现场，退出状态就是 `run_user_mode()` 的返回值。当前使用单一内核启动现场，测试程序的页由测试镜像预留。接入调度器后，由任务模块负责结束进程、回收资源和选择下一个任务。 [用户态进入与退出](../../src/arch/x86_64/enter_user_mode.S) · [Trap 开发计划](../plan/trap.md)

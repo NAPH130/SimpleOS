@@ -45,3 +45,9 @@ void serial::write(const char* text) {
         put(*text++);
     }
 }
+
+void serial::write_bytes(const char* buffer, size_t size) {
+    for (size_t offset = 0; offset < size; ++offset) {
+        put_raw(buffer[offset]);
+    }
+}

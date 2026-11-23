@@ -71,12 +71,12 @@ Ring 3 程序触发异常后，普通中断门可以把执行切到 Ring 0。CPU
 
 ## 5. 怎样从这里走到第一个用户程序
 
-SimpleOS 的独立自检已经能执行两条 Ring 3 指令。下面的前两步对应当前自检。后两步是系统调用阶段的目标，让用户程序请求内核写出一行文字，然后退出。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp) · [Trap 开发计划](../plan/trap.md)
+SimpleOS 的独立自检已经验证两件事。`make test-ring3` 观察用户程序发生异常后怎样换到内核栈。`make test-syscall` 观察用户程序怎样请求内核输出，继续执行，然后退出。 [运行与验证](getting-started.md)
 
 1. **准备指令和栈。** 自检镜像预留独立的代码页和栈页，并通过页表把它们映射到用户虚拟地址 `0x400000` 和 `0x401000`。页表记录访问权限，Ring 3 可以从代码页取指，也可以向栈页写入数据。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp)
 2. **第一次进入 Ring 3。** `enter_user_mode()` 在内核栈上填好用户 `RIP`、`RSP`、`CS`、`SS` 和 `RFLAGS`，再用异常返回指令 `iretq` 读取这份现场。CPU 依照这些值进入 Ring 3，执行 `pushq` 和 `ud2`。随后 CPU 递送 `#UD`，使用 TSS 的 `RSP0` 换回内核栈。 [用户态入口汇编](../../src/arch/x86_64/enter_user_mode.S)
-3. **用户程序发出系统调用。** 按项目计划，用户程序把调用号和参数按约定放入寄存器，然后执行 `int 0x80`。对应的 IDT 门需要设为 `DPL=3`，允许 Ring 3 用这条指令进入，门的目标代码段仍然是 Ring 0。CPU 使用 TSS 的 `RSP0` 换栈并保存用户现场，汇编再把现场交给内核分发。 [系统调用接口](../../include/kernel/syscall.hpp) · [Trap 开发计划](../plan/trap.md)
-4. **内核执行服务并返回。** 以计划中的 `sys_write` 为例，内核通过约定的寄存器取得字符串地址和长度，检查用户缓冲区可读，再从内核侧输出。分发器可把返回值写入现场中约定的寄存器字段，汇编恢复寄存器时将它带回用户程序。此时 `iretq` 使用的是 CPU 在系统调用入口保存的用户返回现场。用户程序继续执行，最后调用 `sys_exit` 结束。
+3. **用户程序发出系统调用。** 用户侧的 `sys_write` 封装把调用号和参数放入约定的寄存器，然后执行 `int 0x80`。IDT 的 `0x80` 号门设为 `DPL=3`，允许用户程序执行这条指令，处理入口位于 Ring 0。CPU 使用 TSS 的 `RSP0` 换栈并保存用户现场，汇编再把现场交给内核分发器。 [用户态封装](../../src/user/syscall.cpp) · [Trap 功能介绍](../architecture/trap.md)
+4. **内核执行服务并返回。** `sys_write` 接收用户缓冲区的地址和长度。检查整段缓冲区后，内核按长度输出字节，再把数量写入现场的 `rax` 字段。汇编用 `iretq` 返回，用户程序读取返回值并继续执行。调用 `sys_exit` 时，内核回到启动程序的位置，并得到退出状态。 [内核系统调用分发](../../src/kernel/syscall.cpp)
 
 一个用户程序跑通后，调度器才需要在多个任务之间保存和恢复执行状态。可以让每个任务带有独立的内核栈。任务 A 在内核里被切走时，保留它的内核栈和恢复位置。任务 B 有自己的栈与恢复位置。调度到 A 时恢复 A 的内核栈指针，继续它先前的内核执行路径。如果切换发生在一次用户态 Trap 中，最终由 `iretq` 使用 A 栈上的返回现场返回用户态。调度器还要在切换时安排好下一次用户态进入内核所用的 `RSP0`。这些属于后续任务管理设计，当前的静态入口栈用于单次用户态往返的准备。 [调度接口](../../include/task/scheduler.hpp) · [开发路线](../plan/roadmap.md)
 
@@ -97,5 +97,6 @@ SimpleOS 的独立自检已经能执行两条 Ring 3 指令。下面的前两步
 1. **跟一次正常返回。** 执行 `make test-boot`，打开 `build/boot-test.log`，找到三条和断点有关的 DEBUG 日志。沿着 `kernel_main()` → `idt.cpp` → `trap_entry.S` → `trap_dispatch()` → `iretq` 找到每次交接发生的位置。从最后一条 `after int3` 反推 CPU 最后恢复了哪个执行地址。
 2. **区分执行地址和访问地址。** 执行 `make test-pf`，打开 `build/tests/trap-pf.log`，在 `#PF` 日志里圈出 `RIP` 和 `CR2`。和测试里打印的 `before unmapped read` 对照，确认一个对应读取指令，一个对应 `0x1000`。
 3. **观察两种内核换栈。** 执行 `make test-df`，查看第 8 号向量选用的应急栈对应的 `IST=yes`。再执行 `make test-ring3`，在 `build/tests/trap-ring3.log` 中找到 `on RSP0 stack=yes`。对照 `gdt.cpp` 找到两块栈的地址分别写到了 TSS 的哪里。 [运行命令及日志位置](getting-started.md) · [GDT 和 TSS](../../src/arch/x86_64/gdt.cpp)
+4. **跟一次系统调用往返。** 执行 `make test-syscall`，查看 `build/tests/trap-syscall.log`。找到用户程序第二次打印的位置，确认它从第一次 `sys_write` 返回后仍能执行。最后一行 `status=42` 对应内核从 `run_user_mode()` 恢复。 [用户程序自检源码](../../tests/trap/syscall_user.cpp) · [内核启动自检源码](../../tests/trap/syscall_test.cpp)
 
 读完这几段后，可以用同样的办法读新模块。先确定硬件或前一个模块会提供什么，再找 C++ 中的接口和数据，最后用可观察的日志或测试检查这条路径是否走通。

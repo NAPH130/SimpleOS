@@ -3,6 +3,7 @@
 #include <arch/x86_64/trap.hpp>
 #include <arch/x86_64/vectors.h>
 #include <kernel/console.hpp>
+#include <kernel/syscall.hpp>
 #include <stddef.h>
 
 namespace x86_64 {
@@ -59,6 +60,9 @@ static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
 
 extern "C" void trap_dispatch(TrapFrame* frame) {
     switch (frame->vector) {
+        case X86_64_VECTOR_SYSCALL:
+            kernel::syscall::dispatch(*frame);
+            return;
         case X86_64_VECTOR_BREAKPOINT:
             kprintf_log(LogLevel::DEBUG, "breakpoint handled\n");
             // int3 保存的 RIP 指向下一条指令，交给汇编恢复现场并返回。

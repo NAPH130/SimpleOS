@@ -14,4 +14,11 @@ extern "C" void switch_to(TaskContext* current, const TaskContext* next);
 // 通过 iretq 从 entry 开始执行，使用 user_stack_top 作为 RSP，保持可屏蔽中断关闭。
 extern "C" [[noreturn]] void enter_user_mode(uintptr_t entry, uintptr_t user_stack_top);
 
+// 在同一 CPU 上一次运行一个用户程序，返回其 sys_exit 状态。前置条件同 enter_user_mode，
+// 调用前保持可屏蔽中断关闭。
+extern "C" int run_user_mode(uintptr_t entry, uintptr_t user_stack_top);
+
+// 恢复 run_user_mode 的内核调用现场。没有保存的启动现场时返回给调用者处理。
+extern "C" void exit_user_mode(int status);
+
 }

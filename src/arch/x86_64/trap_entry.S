@@ -1,7 +1,7 @@
 #include <arch/x86_64/vectors.h>
 
     .text
-    .macro exception_entry entry, vector, has_error_code=0
+    .macro trap_entry entry, vector, has_error_code=0
     .global \entry
     .type \entry, @function
 \entry:
@@ -15,9 +15,10 @@
     .size \entry, .-\entry
     .endm
 
-#define CPU_EXCEPTION(vector, error, name) exception_entry x86_64_exception_ ## vector, vector, error
+#define CPU_EXCEPTION(vector, error, name) trap_entry x86_64_exception_ ## vector, vector, error
 #include <arch/x86_64/exception_vectors.inc>
 #undef CPU_EXCEPTION
+    trap_entry x86_64_syscall_entry, X86_64_VECTOR_SYSCALL
 
 .Ltrap_common:
     # C++ 处理代码可能使用这些寄存器。先保存原值，返回时按反序恢复。

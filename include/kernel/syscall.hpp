@@ -4,8 +4,8 @@
 
 namespace kernel::syscall {
 
-// TODO: 从用户态陷阱现场读取调用号和参数，完成 sys_write、sys_exit、
-// sys_yield 的分发，校验用户缓冲区并把返回值写回现场。
+// 从用户态现场读取请求和参数，成功返回时把结果写回 RAX。
+// TODO: 调度器就绪后接入 sys_yield，并将 sys_exit 交给任务退出路径。
 void dispatch(x86_64::TrapFrame& frame);
 
 }

@@ -10,17 +10,20 @@ LIMINE_COMMIT := 7a9013f305de0bea1f6310e76e7baba30499fef0
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -fno-exceptions -fno-rtti -fno-stack-protector -fno-pie -fno-pic \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
+USER_CXXFLAGS := $(filter-out -fno-pie -mcmodel=kernel,$(CXXFLAGS)) -fpie
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
-    src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp src/arch/x86_64/trap.cpp
+    src/kernel/syscall.cpp src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp \
+    src/arch/x86_64/paging.cpp src/arch/x86_64/trap.cpp
 ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S \
     src/arch/x86_64/enter_user_mode.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
     $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
-TRAP_TESTS := ud gp pf de ss df ring3
+TRAP_TESTS := ud gp pf de ss df ring3 syscall
 TRAP_TEST_OBJECTS := $(TRAP_TESTS:%=$(BUILD)/tests/trap/%_test.o)
 TRAP_TEST_ELFS := $(TRAP_TESTS:%=$(BUILD)/tests/trap-%.elf)
 TRAP_TEST_ISOS := $(TRAP_TEST_ELFS:.elf=.iso)
 TRAP_TEST_TARGETS := $(addprefix test-,$(TRAP_TESTS))
+SYSCALL_USER_OBJECTS := $(BUILD)/tests/trap/syscall_user.o $(BUILD)/user/syscall.o
 
 .PHONY: all build run test test-boot $(TRAP_TEST_TARGETS) clean
 all: build
@@ -38,10 +41,25 @@ $(BUILD)/tests/trap/%_test.o: tests/trap/%_test.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
--include $(OBJECTS:.o=.d) $(TRAP_TEST_OBJECTS:.o=.d)
+$(BUILD)/tests/trap/syscall_user.o: tests/trap/syscall_user.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(USER_CXXFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/%.o: src/user/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(USER_CXXFLAGS) -MMD -MP -c $< -o $@
+
+-include $(OBJECTS:.o=.d) $(TRAP_TEST_OBJECTS:.o=.d) $(SYSCALL_USER_OBJECTS:.o=.d)
+
+$(BUILD)/tests/trap/syscall_user.bin: $(SYSCALL_USER_OBJECTS) tests/trap/syscall_user.ld Makefile
+	$(LD) -nostdlib --oformat=binary -T tests/trap/syscall_user.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/trap/syscall_user_blob.o: tests/trap/syscall_user_blob.S $(BUILD)/tests/trap/syscall_user.bin
+	$(CC) -m64 -Wa,-I,$(@D) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(OBJECTS)
 $(TRAP_TEST_ELFS): $(BUILD)/tests/trap-%.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(BUILD)/tests/trap/%_test.o
+$(BUILD)/tests/trap-syscall.elf: $(BUILD)/tests/trap/syscall_user_blob.o
 $(BUILD)/kernel.elf $(TRAP_TEST_ELFS): linker.ld Makefile
 	$(LD) -nostdlib -static -z max-page-size=0x1000 -T linker.ld $(filter %.o,$^) -o $@
 
