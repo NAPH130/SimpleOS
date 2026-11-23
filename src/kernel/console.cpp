@@ -27,15 +27,8 @@ void write_signed(int value) {
     }
     write_unsigned(magnitude, 10);
 }
-}
 
-void kprintf(const char* format, ...) {
-    if (format == nullptr) {
-        return;
-    }
-
-    va_list args;
-    va_start(args, format);
+void write_format(const char* format, va_list& args) {
     while (*format != '\0') {
         if (*format != '%') {
             serial::put(*format++);
@@ -70,5 +63,42 @@ void kprintf(const char* format, ...) {
                 break;
         }
     }
+}
+}
+
+void kprintf(const char* format, ...) {
+    if (format == nullptr) {
+        return;
+    }
+
+    va_list args;
+    va_start(args, format);
+    write_format(format, args);
+    va_end(args);
+}
+
+void kprintf_log(LogLevel level, const char* format, ...) {
+    if (format == nullptr) {
+        return;
+    }
+
+    switch (level) {
+        case LogLevel::INFO:
+            serial::write("[\x1b[32mINFO");
+            break;
+        case LogLevel::WARN:
+            serial::write("[\x1b[33mWARN");
+            break;
+        case LogLevel::ERROR:
+            serial::write("[\x1b[31mERROR");
+            break;
+        default:
+            return;
+    }
+    serial::write("\x1b[0m] ");
+
+    va_list args;
+    va_start(args, format);
+    write_format(format, args);
     va_end(args);
 }

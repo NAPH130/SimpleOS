@@ -34,6 +34,16 @@ int main() {
     expect("edge cases", "(null) %q %");
     kprintf(nullptr);
     expect("null format", "");
+
+    kprintf_log(LogLevel::INFO, "%s %u\n", "task", 3u);
+    expect("info log", "[\x1b[32mINFO\x1b[0m] task 3\n");
+    kprintf_log(LogLevel::WARN, "queue nearly full");
+    expect("warn log", "[\x1b[33mWARN\x1b[0m] queue nearly full");
+    kprintf_log(LogLevel::ERROR, "code %d", -1);
+    expect("error log", "[\x1b[31mERROR\x1b[0m] code -1");
+    kprintf_log(LogLevel::INFO, nullptr);
+    expect("null log format", "");
+
     if (failures != 0) return 1;
     std::puts("Console formatting tests passed.");
     return 0;

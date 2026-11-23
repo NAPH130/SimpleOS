@@ -4,7 +4,7 @@ SimpleOS 是一个面向操作系统课程实践的教学项目，计划通过�
 
 ## 当前状态
 
-当前支架使用 Limine 经 BIOS 启动 x86_64 内核，在 QEMU 中通过串口输出 `[SimpleOS] Hello, kernel!`。内核提供基础格式化输出 `kprintf`。其余子系统已在 `include/` 中预留 C++ 接口，并用 `// TODO` 标出后续实现点。这些接口目前只有声明，后续添加实现后再接入启动流程。
+当前支架使用 Limine 经 BIOS 启动 x86_64 内核，在 QEMU 中通过串口显示 SimpleOS 字符画和带颜色的启动日志。内核提供格式化输出 `kprintf` 和分级日志 `kprintf_log`。其余子系统已在 `include/` 中预留 C++ 接口，并用 `// TODO` 标出后续实现点。这些接口目前只有声明，后续添加实现后再接入启动流程。
 
 内核使用 freestanding C++17 和少量内联汇编，并在 QEMU 中运行。当前使用 Limine 引导器，而非自行编写 MBR；是否需要自研引导器仍需结合课程验收要求确认。
 
