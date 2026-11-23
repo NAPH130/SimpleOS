@@ -20,7 +20,8 @@ Trap 模块负责把 CPU 异常、已配置设备的硬件中断，以及项目�
 ## 2. 内核栈与特权级入口
 
 - [x] **为双重故障 `#DF` 配置应急栈。** 加载包含内核段与 TSS 的最小 GDT，并通过 IST 为第 8 号向量切换独立栈。`make test-df` 验证双重故障日志中的 `IST=yes`，普通启动继续回归 `int3`。 [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
-- [ ] **为 Ring 3 扩展 GDT 和 TSS。** 定义用户态代码和数据段，为 Ring 3 进入 Ring 0 设置有效的 `RSP0`。通过后续 Ring 3 自检核对异常现场和内核栈的位置。
+- [x] **为 Ring 3 扩展 GDT 和 TSS。** 已加入用户代码段和数据段，`RSP0` 指向独立内核入口栈。`make -j8 test` 回归内核异常路径，在 QEMU 中用 GDB 核对加载的 GDT、任务寄存器、用户段描述符和 `RSP0`。
+- [ ] **验证 Ring 3 的首次进入和换栈。** 建立最小用户代码页和栈页，构造 `iretq` 返回现场并进入 Ring 3，再通过用户态入口自检验证保存的 `CS` 和异常现场是否位于 `RSP0` 指定的内核栈。
 - [ ] **接通 Ring 3 的 `int 0x80`。** 在最小用户代码与栈映射就绪后，为 `0x80` 门设置 `DPL=3`，内核专用门保留 `DPL=0`。约定系统调用号、参数和返回值使用的寄存器，由 Trap 入口把 `TrapFrame` 交给系统调用分发器。验收时运行首个用户程序，通过 `sys_write` 输出文本并返回用户态，再通过 `sys_exit` 结束测试程序。 [系统调用接口](../../include/kernel/syscall.hpp) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 - [ ] **区分内核态和用户态的致命异常。** 根据保存的 `CS` 判断异常来源。内核态致命异常走诊断停机路径。任务退出机制就绪后，将用户态的致命异常交给任务模块处理。验收时让测试用户程序触发 `#UD`，确认程序退出后内核可以继续运行。
 

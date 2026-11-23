@@ -5,7 +5,8 @@
     .global \entry
     .type \entry, @function
 \entry:
-    # 统一栈布局。CPU 已压入的错误码保留在向量号后面。
+    # CPU 已经保存返回现场。部分异常还自带错误码。
+    # 这里补齐缺失的错误码，再压入向量号，让所有入口共用 TrapFrame 布局。
     .if \has_error_code == 0
     pushq $0
     .endif
@@ -19,6 +20,7 @@
 #undef CPU_EXCEPTION
 
 .Ltrap_common:
+    # C++ 处理代码可能使用这些寄存器。先保存原值，返回时按反序恢复。
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -35,9 +37,11 @@
     pushq %r14
     pushq %r15
 
-    # rdi 传递 TrapFrame，C++ 调用保留 rbx 中的原栈顶。
+    # System V AMD64 用 rdi 传递第一个参数，这里传入当前 TrapFrame 的地址。
+    # rbx 由被调用函数保留，用它记住栈帧位置，便于撤销下面的栈对齐。
     movq %rsp, %rdi
     movq %rsp, %rbx
+    # 按调用约定在 call 前对齐到 16 字节，并清除方向标志 DF。
     andq $-16, %rsp
     cld
     call trap_dispatch
@@ -59,7 +63,8 @@
     popq %rcx
     popq %rax
 
-    # 跳过向量号和错误码，CPU 恢复余下的返回现场。
+    # 向量号和错误码各占 8 字节。跳过它们后，栈顶就是 CPU 保存的 RIP。
+    # iretq 从栈上恢复 RIP 和其余返回现场，回到原来的执行流。
     addq $16, %rsp
     iretq
 

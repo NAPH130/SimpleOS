@@ -4,7 +4,8 @@
 
 namespace x86_64 {
 
-// 从栈顶向高地址排列，必须与 trap_entry.S 的压栈顺序一致。
+// 描述一次异常的栈上现场，字段从栈顶向高地址排列。
+// 栈向低地址增长，汇编最后压入的 r15 位于栈顶，因此是第一个字段。
 struct TrapFrame {
     uint64_t r15;
     uint64_t r14;
@@ -21,21 +22,21 @@ struct TrapFrame {
     uint64_t rdx;
     uint64_t rcx;
     uint64_t rax;
-    uint64_t vector;
-    uint64_t error_code;
+    uint64_t vector;     // 汇编入口写入的异常编号，供 C++ 分发。
+    uint64_t error_code; // 部分异常由 CPU 压入，其余入口由汇编补 0。
 
-    // 以下由 CPU 压栈。
-    uint64_t rip;
+    // 以下由 CPU 压栈，供 iretq 恢复原来的执行位置和状态。
+    uint64_t rip;        // 故障通常指向出错指令，int3 指向下一条指令。
     uint64_t cs;
     uint64_t rflags;
-    uint64_t rsp;
+    uint64_t rsp;        // 异常发生前的栈指针。
     uint64_t ss;
 };
 
 // 注册已支持的异常向量并装载 IDT，保持可屏蔽中断关闭。
 void initialize_traps();
 
-// 由汇编入口调用，frame 指向本次异常的栈帧。
+// 由汇编入口调用，frame 指向当前栈上的现场。函数返回后由汇编恢复现场。
 extern "C" void trap_dispatch(TrapFrame* frame);
 
 }

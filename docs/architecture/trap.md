@@ -42,4 +42,10 @@ flowchart TD
 - **`CR2`** 记录触发 `#PF` 的访存地址。例如 `RIP` 能定位某条读内存的指令，`CR2` 告诉你那条指令试图读哪个虚拟地址。处理函数在打印日志前先读取它。 [Intel 系统编程手册，第 4、6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 - **`IST=yes`** 表示 `#DF` 的 `TrapFrame` 位于预留的应急栈中。 [异常诊断实现](../../src/arch/x86_64/trap.cpp)
 
-缺页恢复、Ring 3、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。QEMU 自检命令和日志位置见 [构建、运行与验证](../guides/getting-started.md)。
+## Ring 3 的描述符与内核入口栈
+
+GDT 的第 5、6 项是 Ring 3 的代码段和可写数据段，对应选择子 `0x2b` 和 `0x33`。选择子高位给出表项索引，低两位的 `3` 表示请求的特权级。等实现 `enter_user_mode()` 时，这两个选择子将分别用于返回现场的 `CS` 和 `SS`。 [段选择子](../../include/arch/x86_64/segments.h) · [GDT 初始化](../../src/arch/x86_64/gdt.cpp)
+
+`initialize_segments()` 将独立的 16 KiB 内核入口栈的顶部地址写入 `tss.rsp[0]`。将来普通异常门或系统调用门把 Ring 3 切入 Ring 0 时，CPU 可从这个 `RSP0` 得到内核栈顶，再把用户态返回现场压到栈上。`#DF` 继续从 `IST[1]` 取得自己的应急栈。GDT 和 TSS 分别通过 `lgdt` 和 `ltr` 加载。 [GDT 与栈配置](../../src/arch/x86_64/gdt.cpp) · [描述符加载汇编](../../src/arch/x86_64/gdt_load.S) · [Intel 系统编程手册](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+
+缺页恢复、首次进入 Ring 3、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。QEMU 自检命令和日志位置见 [构建、运行与验证](../guides/getting-started.md)。

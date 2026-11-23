@@ -2,7 +2,9 @@
 
 | 要查的内容 | 文档 |
 | --- | --- |
+| 代码注释、模块设计和文档维护要求 | [SimpleOS 开发约定](AGENTS.MD) |
 | 在 WSL 中安装依赖、启动 QEMU 或运行测试 | [构建、运行与验证](guides/getting-started.md) |
+| 学过操作系统概念，想对照源码了解内核是怎样实现的 | [从操作系统课到动手写内核](guides/from-concepts-to-kernel.md) |
 | 内核怎么启动、源码各目录负责什么 | [内核架构概览](architecture/overview.md) |
 | CPU 异常如何触发、内核如何处理以及怎样读诊断日志 | [Trap 功能介绍](architecture/trap.md) |
 | `kprintf` 支持哪些格式、怎样打印分级日志 | [内核控制台](architecture/console.md) |
@@ -14,7 +16,8 @@
 ```text
 docs/
 ├── README.md       文档索引
-├── guides/         环境、构建、运行与验证指南
+├── AGENTS.MD       开发与文档维护约定
+├── guides/         入门、环境、构建、运行与验证指南
 ├── architecture/   模块职责、接口和已实现机制
 ├── plan/           开发路线、模块 TODO 和验收方法
 └── TEMP/           临时资料、课程截图与参考实验

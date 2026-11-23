@@ -24,8 +24,10 @@ extern "C" [[noreturn]] void kernel_main() {
     if (boot::limine_base_revision_supported()) {
         kprintf_log(LogLevel::INFO, "Limine base revision accepted.\n");
 
+        // 启动时登记异常入口。运行中发生异常时，CPU 会自行查找对应入口。
         x86_64::initialize_traps();
-        // 启动自检覆盖异常入口和返回路径。
+
+        // 主动触发一次断点。能打印 after int3 就说明 CPU 已恢复现场并继续执行。
         kprintf_log(LogLevel::DEBUG, "before int3\n");
         asm volatile("int3" ::: "memory");
         kprintf_log(LogLevel::DEBUG, "after int3\n");
