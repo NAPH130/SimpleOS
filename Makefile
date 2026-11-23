@@ -9,7 +9,8 @@ LIMINE_COMMIT := 7a9013f305de0bea1f6310e76e7baba30499fef0
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -fno-exceptions -fno-rtti -fno-stack-protector -fno-pie -fno-pic \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
-OBJECTS := $(BUILD)/kernel/main.o $(BUILD)/kernel/console.o $(BUILD)/drivers/serial.o
+SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp
+OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES))
 
 .PHONY: all build run test clean
 all: build
