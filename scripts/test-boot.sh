@@ -13,6 +13,10 @@ case "$scenario" in
         image=$build_dir/tests/trap-$scenario.iso
         log=$build_dir/tests/trap-$scenario.log
         ;;
+    frames)
+        image=$build_dir/tests/frames.iso
+        log=$build_dir/tests/frames-test.log
+        ;;
     *)
         echo "Unknown boot test: $scenario" >&2
         exit 2
@@ -83,6 +87,10 @@ if [ "$scenario" != boot ]; then
             exception='System call'
             expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\n')
             ;;
+        frames)
+            exception='Physical frame allocator'
+            expected_logs=$(printf '[\033[32mINFO\033[0m] Physical frame allocator self-test passed.\r\n')
+            ;;
     esac
     if [ -z "$rip" ] || [ "$(cat "$log")" != "$expected_logs" ]; then
         echo "Expected $exception diagnostics matching the test input followed by a halt:" >&2
@@ -101,10 +109,11 @@ expected_logs=$(printf '[\033[%sm%s\033[0m] %s\r\n' \
     34 DEBUG 'before int3' \
     34 DEBUG 'breakpoint handled' \
     34 DEBUG 'after int3' \
+    32 INFO 'Physical frame allocator initialized.' \
     32 INFO 'Minimal kernel ready. Halting CPU.')
 if [ "$(head -n 1 "$log")" != "$banner_top" ] ||
-    [ "$(tail -n 6 "$log")" != "$expected_logs" ]; then
-    echo 'Expected the SimpleOS banner, startup logs, and successful int3 round trip:' >&2
+    [ "$(tail -n 7 "$log")" != "$expected_logs" ]; then
+    echo 'Expected the SimpleOS banner, startup logs, int3 round trip and frame allocator initialization:' >&2
     cat "$log" >&2
     exit 1
 fi

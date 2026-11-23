@@ -13,7 +13,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
 USER_CXXFLAGS := $(filter-out -fno-pie -mcmodel=kernel,$(CXXFLAGS)) -fpie
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
     src/kernel/syscall.cpp src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp \
-    src/arch/x86_64/paging.cpp src/arch/x86_64/trap.cpp
+    src/arch/x86_64/paging.cpp src/arch/x86_64/trap.cpp src/mm/physical_frames.cpp
 ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S \
     src/arch/x86_64/enter_user_mode.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
@@ -24,8 +24,11 @@ TRAP_TEST_ELFS := $(TRAP_TESTS:%=$(BUILD)/tests/trap-%.elf)
 TRAP_TEST_ISOS := $(TRAP_TEST_ELFS:.elf=.iso)
 TRAP_TEST_TARGETS := $(addprefix test-,$(TRAP_TESTS))
 SYSCALL_USER_OBJECTS := $(BUILD)/tests/trap/syscall_user.o $(BUILD)/user/syscall.o
+FRAME_TEST_OBJECT := $(BUILD)/tests/mm/frames_test.o
+FRAME_TEST_ELF := $(BUILD)/tests/frames.elf
+FRAME_TEST_ISO := $(BUILD)/tests/frames.iso
 
-.PHONY: all build run test test-boot $(TRAP_TEST_TARGETS) clean
+.PHONY: all build run test test-boot test-frames $(TRAP_TEST_TARGETS) clean
 all: build
 build: $(BUILD)/simpleos.iso
 
@@ -37,7 +40,7 @@ $(BUILD)/%.o: src/%.S
 	@mkdir -p $(@D)
 	$(CC) -m64 -g -Iinclude -MMD -MP -c $< -o $@
 
-$(BUILD)/tests/trap/%_test.o: tests/trap/%_test.cpp
+$(BUILD)/tests/%_test.o: tests/%_test.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
@@ -49,7 +52,7 @@ $(BUILD)/user/%.o: src/user/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(USER_CXXFLAGS) -MMD -MP -c $< -o $@
 
--include $(OBJECTS:.o=.d) $(TRAP_TEST_OBJECTS:.o=.d) $(SYSCALL_USER_OBJECTS:.o=.d)
+-include $(OBJECTS:.o=.d) $(TRAP_TEST_OBJECTS:.o=.d) $(SYSCALL_USER_OBJECTS:.o=.d) $(FRAME_TEST_OBJECT:.o=.d)
 
 $(BUILD)/tests/trap/syscall_user.bin: $(SYSCALL_USER_OBJECTS) tests/trap/syscall_user.ld Makefile
 	$(LD) -nostdlib --oformat=binary -T tests/trap/syscall_user.ld $(filter %.o,$^) -o $@
@@ -60,7 +63,8 @@ $(BUILD)/tests/trap/syscall_user_blob.o: tests/trap/syscall_user_blob.S $(BUILD)
 $(BUILD)/kernel.elf: $(OBJECTS)
 $(TRAP_TEST_ELFS): $(BUILD)/tests/trap-%.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(BUILD)/tests/trap/%_test.o
 $(BUILD)/tests/trap-syscall.elf: $(BUILD)/tests/trap/syscall_user_blob.o
-$(BUILD)/kernel.elf $(TRAP_TEST_ELFS): linker.ld Makefile
+$(FRAME_TEST_ELF): $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(FRAME_TEST_OBJECT)
+$(BUILD)/kernel.elf $(TRAP_TEST_ELFS) $(FRAME_TEST_ELF): linker.ld Makefile
 	$(LD) -nostdlib -static -z max-page-size=0x1000 -T linker.ld $(filter %.o,$^) -o $@
 
 # 拉取固定提交，避免上游分支变化导致构建行为改变。
@@ -74,7 +78,8 @@ $(LIMINE)/.ready:
 
 $(BUILD)/simpleos.iso: $(BUILD)/kernel.elf
 $(TRAP_TEST_ISOS): $(BUILD)/tests/trap-%.iso: $(BUILD)/tests/trap-%.elf
-$(BUILD)/simpleos.iso $(TRAP_TEST_ISOS): Makefile src/boot/limine.conf $(LIMINE)/.ready
+$(FRAME_TEST_ISO): $(FRAME_TEST_ELF)
+$(BUILD)/simpleos.iso $(TRAP_TEST_ISOS) $(FRAME_TEST_ISO): Makefile src/boot/limine.conf $(LIMINE)/.ready
 	@mkdir -p $(@:.iso=-root)/boot/limine
 	cp $(filter %.elf,$^) $(@:.iso=-root)/boot/kernel.elf
 	cp src/boot/limine.conf $(@:.iso=-root)/boot/limine/limine.conf
@@ -91,11 +96,14 @@ $(BUILD)/tests/console_test: tests/console/console_test.cpp src/kernel/console.c
 	@mkdir -p $(@D)
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -Iinclude tests/console/console_test.cpp src/kernel/console.cpp -o $@
 
-test: $(BUILD)/tests/console_test test-boot $(TRAP_TEST_TARGETS)
+test: $(BUILD)/tests/console_test test-boot test-frames $(TRAP_TEST_TARGETS)
 	$(BUILD)/tests/console_test
 
 test-boot: build
 	sh scripts/test-boot.sh boot $(BUILD)
+
+test-frames: $(FRAME_TEST_ISO)
+	sh scripts/test-boot.sh frames $(BUILD)
 
 $(TRAP_TEST_TARGETS): test-%: $(BUILD)/tests/trap-%.iso
 	sh scripts/test-boot.sh $* $(BUILD)

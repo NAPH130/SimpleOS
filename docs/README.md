@@ -6,6 +6,7 @@
 | 在 WSL 中安装依赖、启动 QEMU 或运行测试 | [构建、运行与验证](guides/getting-started.md) |
 | 学过操作系统概念，想对照源码了解内核是怎样实现的 | [从操作系统课到动手写内核](guides/from-concepts-to-kernel.md) |
 | 内核怎么启动、源码各目录负责什么 | [内核架构概览](architecture/overview.md) |
+| 物理内存从哪里来、4 KiB 页帧怎样分配和释放 | [物理页帧分配](architecture/overview.md#物理页帧分配) |
 | CPU 异常如何处理、系统调用怎样进入内核，以及怎样读诊断日志 | [Trap 功能介绍](architecture/trap.md) |
 | `kprintf` 支持哪些格式、怎样打印分级日志 | [内核控制台](architecture/console.md) |
 | 接下来做什么、各阶段怎样验收 | [开发路线与阶段验收](plan/roadmap.md) |

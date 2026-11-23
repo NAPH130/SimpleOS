@@ -1,4 +1,5 @@
 #include <boot/limine.hpp>
+#include <mm/memory.hpp>
 #include <stdint.h>
 
 namespace {
@@ -34,6 +35,41 @@ volatile HhdmRequest hhdm_request{
     nullptr,
 };
 
+struct MemoryMapEntry {
+    uint64_t base;
+    uint64_t length;
+    uint64_t type;
+};
+
+struct MemoryMapResponse {
+    uint64_t revision;
+    uint64_t entry_count;
+    const MemoryMapEntry* const* entries;
+};
+
+struct MemoryMapRequest {
+    uint64_t id[4];
+    uint64_t revision;
+    const MemoryMapResponse* response;
+};
+
+[[gnu::used, gnu::section(".limine_requests")]]
+volatile MemoryMapRequest memory_map_request{
+    {0xc7b1dd30df4c8b88, 0x0a82e883a194f07b, 0x67cf3d9d378a806f, 0xe304acdfc50c3c62},
+    0,
+    nullptr,
+};
+
+mm::PhysicalRange usable_range(size_t index) {
+    constexpr uint64_t usable_memory = 0;
+    const auto* entry = memory_map_request.response->entries[index];
+    // 引导器、内核镜像和设备等占用的区间在此阶段全部保留。
+    if (entry == nullptr || entry->type != usable_memory) {
+        return {};
+    }
+    return {entry->base, entry->length};
+}
+
 __attribute__((used, section(".limine_requests_end")))
 volatile uint64_t requests_end[] = {
     0xadc0e0531bb10d03, 0x9572709f31764c62
@@ -52,4 +88,14 @@ bool boot::higher_half_direct_map_offset(uintptr_t& offset) {
     }
     offset = response->offset;
     return true;
+}
+
+bool boot::initialize_physical_memory() {
+    const auto* response = memory_map_request.response;
+    uintptr_t direct_map_offset;
+    if (response == nullptr || response->entries == nullptr
+        || !higher_half_direct_map_offset(direct_map_offset)) {
+        return false;
+    }
+    return mm::initialize(response->entry_count, usable_range, direct_map_offset);
 }

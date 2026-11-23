@@ -32,7 +32,13 @@ extern "C" [[noreturn]] void kernel_main() {
         asm volatile("int3" ::: "memory");
         kprintf_log(LogLevel::DEBUG, "after int3\n");
 
-        // TODO: 初始化内存管理及任务调度。
+        if (!boot::initialize_physical_memory()) {
+            kprintf_log(LogLevel::ERROR, "Physical frame allocator initialization failed.\n");
+            x86_64::halt();
+        }
+        kprintf_log(LogLevel::INFO, "Physical frame allocator initialized.\n");
+
+        // TODO: 初始化内核堆及任务调度。
         kprintf_log(LogLevel::INFO, "Minimal kernel ready. Halting CPU.\n");
     } else {
         kprintf_log(LogLevel::ERROR, "Unsupported Limine base revision.\n");
