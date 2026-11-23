@@ -1,60 +1,35 @@
 # SimpleOS
 
-SimpleOS 是一个面向操作系统课程实践的教学项目，计划通过逐步实现最小内核、内存管理、任务调度等功能，理解操作系统各部分如何协作。
+SimpleOS 是一个面向操作系统课程实践的 x86_64 教学内核，使用 freestanding C++17 和 x86_64 汇编。项目在同一个内核中逐步实现异常与系统调用、内存管理、任务调度等功能。
 
 ## 当前状态
 
-当前支架使用 Limine 经 BIOS 启动 x86_64 内核，在 QEMU 中通过串口显示 SimpleOS 字符画和带颜色的启动日志。内核提供格式化输出 `kprintf` 和分级日志 `kprintf_log`。其余子系统已在 `include/` 中预留 C++ 接口，并用 `// TODO` 标出后续实现点。这些接口目前只有声明，后续添加实现后再接入启动流程。
+当前使用 Limine 在 QEMU BIOS 环境启动，通过 COM1 串口显示字符画和分级日志。内核已实现 `kprintf`、`kprintf_log` 和内核态 `int3` 断点自检，能够进入异常处理并恢复执行。其余子系统的预留接口位于 `include/`。 [内核架构](docs/architecture/overview.md)
 
-内核使用 freestanding C++17 和少量内联汇编，并在 QEMU 中运行。当前使用 Limine 引导器，而非自行编写 MBR；是否需要自研引导器仍需结合课程验收要求确认。
+## 快速启动
 
-## 在 WSL 中构建和运行
-
-在 Ubuntu 中安装所需工具：
+在 x86_64 的 WSL Ubuntu 中安装依赖，然后在仓库根目录运行以下命令。 [依赖安装与验证指南](docs/guides/getting-started.md)
 
 ```bash
-sudo apt update
-sudo apt install build-essential git xorriso qemu-system-x86 gdb
+make run    # 构建启动镜像并启动 QEMU
+make test   # 检查控制台输出和 QEMU 启动
 ```
 
-进入项目目录后执行：
-
-```bash
-make build  # 编译内核，下载固定版本的 Limine，生成 BIOS 启动 ISO
-make run    # 启动 QEMU，在当前终端显示串口输出
-make test   # 检查格式化输出及启动输出（启动测试最多等待 15 秒）
-```
-
-首次构建需要联网获取 Limine，后续构建使用 `build/deps/` 中的缓存。`make build/kernel.elf` 可以单独编译和链接内核，无需下载引导器。`make run` 启动后可通过 `Ctrl+C` 结束 QEMU；`make clean` 会删除整个 `build/`，包括生成文件和已下载的引导器。当前启动目标为 QEMU BIOS 光盘。
-
-内核使用针对 freestanding 编译配置的 Ubuntu x86_64 GCC，不链接 Linux 标准库；这不等于一套独立的裸机交叉工具链。编译选项和目标架构假定开发环境为 x86_64 Ubuntu。
+首次生成镜像需要联网获取固定版本的 Limine。看到 `after int3` 表示断点自检已返回。运行 `make run` 时按 `Ctrl+C` 退出 QEMU，再运行测试。
 
 ## 项目目录
 
 ```text
-src/           项目源码
-  boot/        引导配置与启动入口
-  arch/x86_64/ x86_64 架构相关机制
-  kernel/      内核初始化及核心服务
-  drivers/     设备驱动
-  mm/          内存管理
-  task/        任务、进程及调度
-  sync/        同步机制
-  fs/          文件系统
-  loader/      用户程序装载
-  lib/         内核基础工具
-  user/        用户态基础库与应用
-include/       各模块头文件
-tests/         各子系统的功能测试
-scripts/       构建、运行及调试辅助脚本
-docs/begin/    项目需求、设计和启动说明
-docs/steps/    分阶段实施指南
-docs/TEMP/     课程评分截图与参考实验材料
-build/         本地构建产物（生成后不纳入版本管理）
+src/       项目源码
+include/   各模块头文件
+tests/     宿主机测试
+scripts/   QEMU 启动验证脚本
+docs/      开发文档与索引
+build/     本地生成的镜像、日志及引导器缓存
 ```
 
-目录职责、预留接口和对应阶段见 [项目目录结构说明](docs/begin/项目目录结构说明.md)。
+## 开发文档
 
-## 下一步
-
-启动流程和串口输出见 [最小内核启动说明](docs/begin/最小内核启动说明.md)。下一阶段从陷阱处理和系统调用接口开始，运行第一个独立编译的用户程序。
+- 文档目录与维护方式。 [开发文档索引](docs/README.md)
+- `int3`、IDT 和 `TrapFrame` 的实现原理。 [Trap 功能介绍](docs/architecture/trap.md)
+- 下一步的 CPU 异常诊断、用户态系统调用及后续阶段的验收目标。 [开发路线](docs/development/roadmap.md)

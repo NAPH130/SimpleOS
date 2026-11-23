@@ -1,6 +1,7 @@
 SHELL := /bin/sh
 .DELETE_ON_ERROR:
 
+CC := gcc
 CXX := g++
 LD := ld
 BUILD := build
@@ -9,8 +10,11 @@ LIMINE_COMMIT := 7a9013f305de0bea1f6310e76e7baba30499fef0
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -fno-exceptions -fno-rtti -fno-stack-protector -fno-pie -fno-pic \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
-SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp
-OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES))
+SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
+    src/arch/x86_64/idt.cpp src/arch/x86_64/trap.cpp
+ASM_SOURCES := src/arch/x86_64/trap_entry.S
+OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
+    $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
 
 .PHONY: all build run test clean
 all: build
@@ -19,6 +23,10 @@ build: $(BUILD)/simpleos.iso
 $(BUILD)/%.o: src/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/%.o: src/%.S
+	@mkdir -p $(@D)
+	$(CC) -m64 -g -Iinclude -MMD -MP -c $< -o $@
 
 -include $(OBJECTS:.o=.d)
 

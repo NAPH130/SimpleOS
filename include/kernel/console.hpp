@@ -8,6 +8,7 @@ enum class LogLevel {
     INFO,
     WARN,
     ERROR,
+    DEBUG,
 };
 
 // 使用与 kprintf 相同的格式，先输出带颜色的级别标签。换行由 format 指定。

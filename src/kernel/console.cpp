@@ -83,6 +83,9 @@ void kprintf_log(LogLevel level, const char* format, ...) {
     }
 
     switch (level) {
+        case LogLevel::DEBUG:
+            serial::write("[\x1b[34mDEBUG");
+            break;
         case LogLevel::INFO:
             serial::write("[\x1b[32mINFO");
             break;

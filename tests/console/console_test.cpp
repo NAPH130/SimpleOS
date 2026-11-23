@@ -35,6 +35,8 @@ int main() {
     kprintf(nullptr);
     expect("null format", "");
 
+    kprintf_log(LogLevel::DEBUG, "trap vector %u\n", 3u);
+    expect("debug log", "[\x1b[34mDEBUG\x1b[0m] trap vector 3\n");
     kprintf_log(LogLevel::INFO, "%s %u\n", "task", 3u);
     expect("info log", "[\x1b[32mINFO\x1b[0m] task 3\n");
     kprintf_log(LogLevel::WARN, "queue nearly full");

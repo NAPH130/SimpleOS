@@ -12,13 +12,16 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     exit "$status"
 fi
 banner_top=$(printf ' ____  _                 _       ___  ____\r')
-expected_logs=$(printf '[\033[32mINFO\033[0m] %s\r\n' \
-    'COM1 serial console initialized.' \
-    'Limine base revision accepted.' \
-    'Minimal kernel ready. Halting CPU.')
+expected_logs=$(printf '[\033[%sm%s\033[0m] %s\r\n' \
+    32 INFO 'COM1 serial console initialized.' \
+    32 INFO 'Limine base revision accepted.' \
+    34 DEBUG 'before int3' \
+    34 DEBUG 'breakpoint handled' \
+    34 DEBUG 'after int3' \
+    32 INFO 'Minimal kernel ready. Halting CPU.')
 if [ "$(head -n 1 "$log")" != "$banner_top" ] ||
-    [ "$(tail -n 3 "$log")" != "$expected_logs" ]; then
-    echo 'Expected the SimpleOS banner followed by colored startup logs:' >&2
+    [ "$(tail -n 6 "$log")" != "$expected_logs" ]; then
+    echo 'Expected the SimpleOS banner, startup logs, and successful int3 round trip:' >&2
     cat "$log" >&2
     exit 1
 fi
