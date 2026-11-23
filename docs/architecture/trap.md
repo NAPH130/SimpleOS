@@ -1,33 +1,45 @@
 # Trap 功能介绍
 
-Trap 路径让内核接收 CPU 异常，按照向量号选择处理函数，并在处理允许继续时恢复原来的执行。SimpleOS 目前支持第 3 号断点异常 `#BP` 和第 6 号无效指令异常 `#UD`。正常启动验证 `int3` 返回，独立测试镜像验证 `ud2` 触发诊断停机。两个自检都在内核态运行，期间保持可屏蔽中断关闭。 [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+Trap 模块负责内核运行时的 CPU 异常处理。CPU 发现异常后，通过中断描述符表（IDT）找到入口。内核保存执行现场，根据异常类型处理，再决定是否恢复原来的执行。SimpleOS 当前为内核态的 `0–31` 号向量安装了入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余向量走诊断停机路径。
 
-## 断点异常的执行路径
+## 运行中何时会进入 Trap
+
+执行指令、访问内存和切换段时，CPU 会检查操作是否符合规则。发现异常后，CPU 用**向量号**标识事件，并自动进入对应的处理入口。代码也可以通过 `int3` 主动触发断点。 [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+
+| 异常 | 运行中的典型触发条件 | SimpleOS 当前处理 |
+| --- | --- | --- |
+| `#DE`（0）除法异常 | 整数除法的除数为零，或商超出目标寄存器的范围 | 记录异常和故障指令地址，停机 |
+| `#BP`（3）断点异常 | 执行软件断点指令 `int3`，例如调试器插入的断点 | 记录断点日志，从 `int3` 后继续执行 |
+| `#UD`（6）无效指令 | 执行当前 CPU 或执行模式不支持的指令 | 记录故障指令地址，停机 |
+| `#DF`（8）双重故障 | CPU 递送异常时又遇到无法按常规顺序处理的异常组合 | 切到应急栈，记录最小诊断后停机 |
+| `#SS`（12）栈段异常 | 例如内核尝试加载标为不存在的栈段 | 记录故障指令地址和硬件错误码，停机 |
+| `#GP`（13）一般保护异常 | 例如内核加载了不符合要求的段描述符 | 记录故障指令地址和硬件错误码，停机 |
+| `#PF`（14）缺页异常 | 访问未映射的虚拟地址，或访问违反页权限 | 记录故障指令地址、访存地址和硬件错误码，停机 |
+
+其他向量的名称和错误码规则见 [异常向量表](../../include/arch/x86_64/exception_vectors.inc)。
+
+## 从异常入口到处理结果
 
 ```mermaid
 flowchart TD
-    A["内核加载 IDT，执行 int3"] --> B["CPU 保存返回现场，查第 3 号入口"]
-    B --> C["汇编保存通用寄存器，构成 TrapFrame"]
-    C --> D["C++ 根据向量号处理断点"]
-    D --> E["汇编恢复寄存器，执行 iretq"]
-    E --> F["CPU 回到 int3 后面的指令"]
+    A["CPU 发现异常，根据向量号查 IDT"] --> B["CPU 保存返回现场并跳入汇编入口"]
+    B --> C["汇编保存通用寄存器，整理 TrapFrame"]
+    C --> D["trap_dispatch 读取向量号并处理"]
+    D -->|"断点"| E["恢复寄存器，iretq 返回"]
+    D -->|"其他异常"| F["输出诊断，停机"]
 ```
 
-1. **注册入口。** `initialize_traps()` 将 `x86_64_breakpoint_entry` 的地址写入 `idt[3]`，再用 `lidt` 告诉 CPU 表的位置和大小。IDT 是中断描述符表，CPU 用向量号查找相应的处理入口。 [idt.cpp](../../src/arch/x86_64/idt.cpp)
-2. **将现场写入栈。** `int3` 触发后，CPU 压入恢复执行所需的 `RIP`、`RFLAGS`、原栈指针等信息。汇编入口补上向量号 `3` 和错误码占位值 `0`，再保存 15 个通用寄存器。汇编最后压入 `r15`，所以从栈顶往高地址看，`TrapFrame` 的第一个字段就是 `r15`。 [汇编入口](../../src/arch/x86_64/trap_entry.S) · [TrapFrame](../../include/arch/x86_64/trap.hpp)
-3. **调用 C++ 处理函数。** 汇编传入 `TrapFrame*`，并对齐调用栈。`trap_dispatch()` 通过 `frame->vector` 读出向量号，识别断点后输出 `breakpoint handled`，再返回汇编入口。 [trap.cpp](../../src/arch/x86_64/trap.cpp) · [AMD64 System V ABI](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex)
-4. **从栈恢复现场。** 汇编弹出通用寄存器，跳过向量号和错误码，再执行 `iretq`，让 CPU 恢复返回地址和标志等信息。断点的返回地址指向 `int3` 之后，所以内核会继续打印 `after int3`。 [返回入口](../../src/arch/x86_64/trap_entry.S) · [启动自检](../../src/kernel/main.cpp)
+1. **按向量找入口。** 启动时 `initialize_traps()` 安装异常门并加载 IDT。例如 CPU 触发 `#PF` 时，通过 `IDT[14]` 找到第 14 号入口。`#DF` 的门还配置了 IST（中断栈表），CPU 在保存返回现场前会切到 TSS 指定的独立应急栈。 [IDT 初始化](../../src/arch/x86_64/idt.cpp) · [GDT 和 TSS](../../src/arch/x86_64/gdt.cpp)
+2. **把现场整理到栈上。** CPU 保存 `RIP`、标志寄存器和原栈指针等返回信息。汇编补上向量号并保存通用寄存器。对于 `#GP`、`#PF` 等异常，错误码来自 CPU。对于 `#BP`、`#UD` 等异常，汇编用 `0` 补齐同一个字段。 [汇编入口](../../src/arch/x86_64/trap_entry.S)
+3. **按异常类型处理。** 汇编把现场地址传给 C++ 的 `trap_dispatch(TrapFrame* frame)`。`TrapFrame` 描述数据在栈上的排列，`frame->vector` 就是从这份现场读取向量号。分发函数据此选择断点返回、缺页诊断、双重故障诊断或通用诊断。 [TrapFrame](../../include/arch/x86_64/trap.hpp) · [C++ 分发](../../src/arch/x86_64/trap.cpp)
+4. **恢复执行或停机。** 断点处理返回后，汇编恢复通用寄存器，再用 `iretq` 让 CPU 恢复返回现场。`#BP` 保存的 `RIP` 指向 `int3` 后面。`#UD` 和 `#PF` 保存的 `RIP` 指向故障指令，故障原因仍存在时，返回后会再次触发同一异常。 [汇编返回路径](../../src/arch/x86_64/trap_entry.S) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
-## 无效指令为什么进入停机路径
+## 如何读异常诊断
 
-`ud2` 专门用来触发无效指令异常。CPU 查 `IDT[6]`，汇编入口压入向量号 `6` 和错误码占位值 `0`，然后和 `int3` 共用寄存器保存流程。C++ 分发函数从 `TrapFrame` 读出向量号和 `RIP`，打印诊断后停机。 [IDT](../../src/arch/x86_64/idt.cpp) · [汇编入口](../../src/arch/x86_64/trap_entry.S) · [异常分发](../../src/arch/x86_64/trap.cpp)
+- **向量号**说明发生了哪一种异常。
+- **`RIP`** 是 CPU 保存的指令地址。排查 `#UD`、`#GP`、`#PF` 时，可以用它定位触发故障的指令。
+- **`error_code`** 提供进一步的原因，含义由异常类型决定。比如 `#PF` 的错误码可帮助区分页面不存在与权限违规。`#GP` 或 `#PF` 的硬件错误码也可能为 `0`。
+- **`CR2`** 记录触发 `#PF` 的访存地址。例如 `RIP` 能定位某条读内存的指令，`CR2` 告诉你那条指令试图读哪个虚拟地址。处理函数在打印日志前先读取它。 [Intel 系统编程手册，第 4、6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+- **`IST=yes`** 表示 `#DF` 的 `TrapFrame` 位于预留的应急栈中。 [异常诊断实现](../../src/arch/x86_64/trap.cpp)
 
-`#UD` 保存的 `RIP` 指向出错的 `ud2` 本身。如果直接执行 `iretq`，CPU 会回到同一条指令，再次触发异常。日志里的 `RIP` 因此既是故障地址，也解释了这条处理路径为什么选择停机。 [Intel 指令手册，UD2](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf)
-
-## 在 QEMU 中验证
-
-执行 `make run`，在串口输出中找到 `before int3`、`breakpoint handled`、`after int3`。中间一条表示 CPU 已进入处理函数，最后一条表示 CPU 成功恢复执行。
-
-执行 `make test-ud` 启动测试镜像。测试入口在执行 `ud2` 前打印该指令地址。脚本检查 `[ERROR] #UD Invalid opcode (vector 6)` 日志中的 `RIP` 与地址一致，并确认 QEMU 保持运行到超时、串口只出现预期的两条日志。`make test` 包含两个 QEMU 自检。 [测试入口](../../tests/trap/ud_test.cpp) · [启动测试脚本](../../scripts/test-boot.sh) · [构建与验证指南](../guides/getting-started.md)
-
-后续可沿用按向量查入口、在栈上保存现场、处理后恢复执行的机制，接入缺页异常、定时器中断和计划中的 `int 0x80` 系统调用。 [Trap 开发计划](../plan/trap.md)
+缺页恢复、Ring 3、系统调用和设备 IRQ 的后续工作记录在 [Trap 开发计划](../plan/trap.md)。QEMU 自检命令和日志位置见 [构建、运行与验证](../guides/getting-started.md)。

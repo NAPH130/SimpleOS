@@ -32,7 +32,7 @@ struct TrapFrame {
     uint64_t ss;
 };
 
-// 注册断点和无效指令异常并装载 IDT，保持可屏蔽中断关闭。
+// 注册已支持的异常向量并装载 IDT，保持可屏蔽中断关闭。
 void initialize_traps();
 
 // 由汇编入口调用，frame 指向本次异常的栈帧。

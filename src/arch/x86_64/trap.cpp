@@ -1,4 +1,5 @@
 #include <arch/x86_64/cpu.hpp>
+#include <arch/x86_64/gdt.hpp>
 #include <arch/x86_64/trap.hpp>
 #include <arch/x86_64/vectors.h>
 #include <kernel/console.hpp>
@@ -11,20 +12,56 @@ static_assert(offsetof(TrapFrame, error_code) == 128);
 static_assert(offsetof(TrapFrame, rip) == 136);
 static_assert(sizeof(TrapFrame) == 176);
 
-extern "C" void trap_dispatch(TrapFrame* frame) {
-    if (frame->vector == X86_64_VECTOR_BREAKPOINT) {
-        kprintf_log(LogLevel::DEBUG, "breakpoint handled\n");
-        return;
+namespace {
+
+constexpr const char* exception_names[] = {
+#define CPU_EXCEPTION(vector, error, name) name,
+#include <arch/x86_64/exception_vectors.inc>
+#undef CPU_EXCEPTION
+};
+static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
+
+[[noreturn]] void handle_fault(const TrapFrame& frame) {
+    const auto vector = static_cast<unsigned>(frame.vector);
+    uintptr_t fault_address = 0;
+    if (vector == X86_64_VECTOR_PAGE_FAULT) {
+        // CR2 会被下一次缺页覆盖，先捕获地址再打印日志。
+        asm volatile("mov %%cr2, %0" : "=r"(fault_address));
     }
 
-    if (frame->vector == X86_64_VECTOR_INVALID_OPCODE) {
-        // #UD 的 RIP 指向出错指令，直接返回会再次触发同一故障。
-        kprintf_log(LogLevel::ERROR, "#UD Invalid opcode (vector %u), RIP=%p. Halting CPU.\n",
-                    static_cast<unsigned>(frame->vector), reinterpret_cast<void*>(frame->rip));
+    const auto error = static_cast<unsigned>(frame.error_code);
+    void* const rip = reinterpret_cast<void*>(frame.rip);
+    const char* name = exception_names[vector];
+    if (vector == X86_64_VECTOR_PAGE_FAULT) {
+        kprintf_log(LogLevel::ERROR, "%s (vector %u), error=0x%x, RIP=%p, CR2=%p. Halting CPU.\n",
+                    name, vector, error, rip, reinterpret_cast<void*>(fault_address));
+    } else if (vector == X86_64_VECTOR_INVALID_OPCODE) {
+        kprintf_log(LogLevel::ERROR, "%s (vector %u), RIP=%p. Halting CPU.\n", name, vector, rip);
     } else {
-        // TODO: 将其他异常、设备中断和系统调用交给对应模块。
-        kprintf_log(LogLevel::ERROR, "Unhandled trap vector %u\n",
-                    static_cast<unsigned>(frame->vector));
+        kprintf_log(LogLevel::ERROR, "%s (vector %u), error=0x%x, RIP=%p. Halting CPU.\n",
+                    name, vector, error, rip);
+    }
+    halt();
+}
+
+}
+
+extern "C" void trap_dispatch(TrapFrame* frame) {
+    switch (frame->vector) {
+        case X86_64_VECTOR_BREAKPOINT:
+            kprintf_log(LogLevel::DEBUG, "breakpoint handled\n");
+            return;
+        case X86_64_VECTOR_DOUBLE_FAULT:
+            kprintf_log(LogLevel::ERROR, "#DF Double fault (vector 8), error=0x%x, IST=%s. Halting CPU.\n",
+                        static_cast<unsigned>(frame->error_code),
+                        on_double_fault_stack(frame) ? "yes" : "no");
+            halt();
+        default:
+            if (frame->vector < sizeof(exception_names) / sizeof(exception_names[0])) {
+                handle_fault(*frame);
+            }
+            kprintf_log(LogLevel::ERROR, "Unhandled trap vector %u\n", static_cast<unsigned>(frame->vector));
+            break;
     }
     halt();
 }

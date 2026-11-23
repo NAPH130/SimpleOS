@@ -1,19 +1,22 @@
 #include <arch/x86_64/vectors.h>
 
     .text
-    .macro exception_without_error entry, vector
+    .macro exception_entry entry, vector, has_error_code=0
     .global \entry
     .type \entry, @function
 \entry:
-    # 为无硬件错误码的异常补齐错误码和向量号。
+    # 统一栈布局。CPU 已压入的错误码保留在向量号后面。
+    .if \has_error_code == 0
     pushq $0
+    .endif
     pushq $\vector
     jmp .Ltrap_common
     .size \entry, .-\entry
     .endm
 
-    exception_without_error x86_64_breakpoint_entry, X86_64_VECTOR_BREAKPOINT
-    exception_without_error x86_64_invalid_opcode_entry, X86_64_VECTOR_INVALID_OPCODE
+#define CPU_EXCEPTION(vector, error, name) exception_entry x86_64_exception_ ## vector, vector, error
+#include <arch/x86_64/exception_vectors.inc>
+#undef CPU_EXCEPTION
 
 .Ltrap_common:
     pushq %rax

@@ -9,9 +9,9 @@ case "$scenario" in
         image=$build_dir/simpleos.iso
         log=$build_dir/boot-test.log
         ;;
-    ud)
-        image=$build_dir/tests/trap-ud.iso
-        log=$build_dir/tests/trap-ud.log
+    ud|gp|pf|de|ss|df)
+        image=$build_dir/tests/trap-$scenario.iso
+        log=$build_dir/tests/trap-$scenario.log
         ;;
     *)
         echo "Unknown boot test: $scenario" >&2
@@ -29,17 +29,54 @@ if [ "$status" -ne 124 ]; then
     exit 1
 fi
 
-if [ "$scenario" = ud ]; then
-    rip=$(sed -n '1s/.*before ud2 at \(0x[0-9a-f][0-9a-f]*\).*/\1/p' "$log")
-    expected_logs=$(printf '[\033[34mDEBUG\033[0m] before ud2 at %s\r\n[\033[31mERROR\033[0m] #UD Invalid opcode (vector 6), RIP=%s. Halting CPU.\r\n' \
-        "$rip" "$rip")
+if [ "$scenario" != boot ]; then
+    rip=unknown
+    case "$scenario" in
+        ud)
+            exception='#UD'
+            rip=$(sed -n '1s/.*before ud2 at \(0x[0-9a-f][0-9a-f]*\).*/\1/p' "$log")
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before ud2 at %s\r\n[\033[31mERROR\033[0m] #UD Invalid opcode (vector 6), RIP=%s. Halting CPU.\r\n' \
+                "$rip" "$rip")
+            ;;
+        gp)
+            exception='#GP'
+            fields=$(sed -n '1s/.*before mov ss at \(0x[0-9a-f][0-9a-f]*\), expected error=\(0x[1-9a-f][0-9a-f]*\).*/\1 \2/p' "$log")
+            rip=${fields%% *}
+            error=${fields#* }
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before mov ss at %s, expected error=%s\r\n[\033[31mERROR\033[0m] #GP General protection fault (vector 13), error=%s, RIP=%s. Halting CPU.\r\n' \
+                "$rip" "$error" "$error" "$rip")
+            ;;
+        pf)
+            exception='#PF'
+            rip=$(sed -n '1s/.*before unmapped read at \(0x[0-9a-f][0-9a-f]*\), address=0x1000.*/\1/p' "$log")
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before unmapped read at %s, address=0x1000\r\n[\033[31mERROR\033[0m] #PF Page fault (vector 14), error=0x0, RIP=%s, CR2=0x1000. Halting CPU.\r\n' \
+                "$rip" "$rip")
+            ;;
+        de)
+            exception='#DE'
+            rip=$(sed -n '2s/.*RIP=\(0x[0-9a-f][0-9a-f]*\).*/\1/p' "$log")
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before integer divide by zero\r\n[\033[31mERROR\033[0m] #DE Divide error (vector 0), error=0x0, RIP=%s. Halting CPU.\r\n' \
+                "$rip")
+            ;;
+        ss)
+            exception='#SS'
+            error=$(sed -n '1s/.*expected error=\(0x[1-9a-f][0-9a-f]*\).*/\1/p' "$log")
+            rip=$(sed -n '2s/.*RIP=\(0x[0-9a-f][0-9a-f]*\).*/\1/p' "$log")
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before absent stack segment, expected error=%s\r\n[\033[31mERROR\033[0m] #SS Stack segment fault (vector 12), error=%s, RIP=%s. Halting CPU.\r\n' \
+                "$error" "$error" "$rip")
+            ;;
+        df)
+            exception='#DF'
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before general protection fault with absent gate\r\n[\033[31mERROR\033[0m] #DF Double fault (vector 8), error=0x0, IST=yes. Halting CPU.\r\n')
+            ;;
+    esac
     if [ -z "$rip" ] || [ "$(cat "$log")" != "$expected_logs" ]; then
-        echo 'Expected #UD at the ud2 instruction address followed by a halt:' >&2
+        echo "Expected $exception diagnostics matching the test input followed by a halt:" >&2
         cat "$log" >&2
         exit 1
     fi
     cat "$log"
-    echo '#UD test passed.'
+    echo "$exception test passed."
     exit 0
 fi
 

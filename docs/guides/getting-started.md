@@ -30,8 +30,11 @@ sudo apt install build-essential git xorriso qemu-system-x86
 | --- | --- |
 | `make build` | 编译并链接内核，生成 BIOS 启动镜像。 |
 | `make build/kernel.elf` | 只生成内核 ELF，适合先检查编译和链接。此目标无需下载引导器。 |
-| `make test` | 运行宿主机控制台测试、常规 QEMU 启动测试和独立的 `#UD` 自检。 |
+| `make -j8 test` | 并行运行全部 QEMU 异常自检，再运行宿主机控制台测试。 |
 | `make test-ud` | 只运行 `#UD` 自检，验证第 6 号异常的故障地址和停机路径。 |
+| `make test-gp` | 只运行 `#GP` 自检，验证第 13 号异常的故障地址和非零硬件错误码。 |
+| `make test-pf` | 核对缺页异常的 `CR2`、`RIP` 和错误码。 |
+| `make test-de`、`make test-ss`、`make test-df` | 分别验证除零、栈段和双重故障，`#DF` 日志确认应急栈。 |
 | `make clean` | 删除 `build/`，包括引导器缓存和测试日志。 |
 
-每个 QEMU 自检会在约 15 秒后结束，再检查串口内容。正常启动结果保存在 `build/boot-test.log`，`#UD` 自检结果保存在 `build/tests/trap-ud.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)
+每个 QEMU 自检会在约 15 秒后结束，再检查串口内容。正常启动记录保存在 `build/boot-test.log`，故障自检记录在 `build/tests/trap-<异常名>.log`，例如 `build/tests/trap-pf.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)

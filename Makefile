@@ -11,14 +11,17 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -fno-exceptions -fno-rtti -fno-stack-protector -fno-pie -fno-pic \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
-    src/arch/x86_64/idt.cpp src/arch/x86_64/trap.cpp
-ASM_SOURCES := src/arch/x86_64/trap_entry.S
+    src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp src/arch/x86_64/trap.cpp
+ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \
     $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
-UD_TEST_OBJECT := $(BUILD)/tests/trap/ud_test.o
-UD_TEST_ISO := $(BUILD)/tests/trap-ud.iso
+TRAP_TESTS := ud gp pf de ss df
+TRAP_TEST_OBJECTS := $(TRAP_TESTS:%=$(BUILD)/tests/trap/%_test.o)
+TRAP_TEST_ELFS := $(TRAP_TESTS:%=$(BUILD)/tests/trap-%.elf)
+TRAP_TEST_ISOS := $(TRAP_TEST_ELFS:.elf=.iso)
+TRAP_TEST_TARGETS := $(addprefix test-,$(TRAP_TESTS))
 
-.PHONY: all build run test test-boot test-ud clean
+.PHONY: all build run test test-boot $(TRAP_TEST_TARGETS) clean
 all: build
 build: $(BUILD)/simpleos.iso
 
@@ -30,15 +33,15 @@ $(BUILD)/%.o: src/%.S
 	@mkdir -p $(@D)
 	$(CC) -m64 -g -Iinclude -MMD -MP -c $< -o $@
 
-$(UD_TEST_OBJECT): tests/trap/ud_test.cpp
+$(BUILD)/tests/trap/%_test.o: tests/trap/%_test.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
--include $(OBJECTS:.o=.d) $(UD_TEST_OBJECT:.o=.d)
+-include $(OBJECTS:.o=.d) $(TRAP_TEST_OBJECTS:.o=.d)
 
 $(BUILD)/kernel.elf: $(OBJECTS)
-$(BUILD)/tests/trap-ud.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(UD_TEST_OBJECT)
-$(BUILD)/kernel.elf $(BUILD)/tests/trap-ud.elf: linker.ld
+$(TRAP_TEST_ELFS): $(BUILD)/tests/trap-%.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(BUILD)/tests/trap/%_test.o
+$(BUILD)/kernel.elf $(TRAP_TEST_ELFS): linker.ld Makefile
 	$(LD) -nostdlib -static -z max-page-size=0x1000 -T linker.ld $(filter %.o,$^) -o $@
 
 # 拉取固定提交，避免上游分支变化导致构建行为改变。
@@ -51,8 +54,8 @@ $(LIMINE)/.ready:
 	@touch $@
 
 $(BUILD)/simpleos.iso: $(BUILD)/kernel.elf
-$(UD_TEST_ISO): $(BUILD)/tests/trap-ud.elf
-$(BUILD)/simpleos.iso $(UD_TEST_ISO): Makefile src/boot/limine.conf $(LIMINE)/.ready
+$(TRAP_TEST_ISOS): $(BUILD)/tests/trap-%.iso: $(BUILD)/tests/trap-%.elf
+$(BUILD)/simpleos.iso $(TRAP_TEST_ISOS): Makefile src/boot/limine.conf $(LIMINE)/.ready
 	@mkdir -p $(@:.iso=-root)/boot/limine
 	cp $(filter %.elf,$^) $(@:.iso=-root)/boot/kernel.elf
 	cp src/boot/limine.conf $(@:.iso=-root)/boot/limine/limine.conf
@@ -69,14 +72,14 @@ $(BUILD)/tests/console_test: tests/console/console_test.cpp src/kernel/console.c
 	@mkdir -p $(@D)
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -Iinclude tests/console/console_test.cpp src/kernel/console.cpp -o $@
 
-test: $(BUILD)/tests/console_test test-boot test-ud
+test: $(BUILD)/tests/console_test test-boot $(TRAP_TEST_TARGETS)
 	$(BUILD)/tests/console_test
 
 test-boot: build
 	sh scripts/test-boot.sh boot $(BUILD)
 
-test-ud: $(UD_TEST_ISO)
-	sh scripts/test-boot.sh ud $(BUILD)
+$(TRAP_TEST_TARGETS): test-%: $(BUILD)/tests/trap-%.iso
+	sh scripts/test-boot.sh $* $(BUILD)
 
 clean:
 	rm -rf $(BUILD)
