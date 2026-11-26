@@ -5,6 +5,7 @@
 #include <kernel/console.hpp>
 #include <stdint.h>
 
+// mov 写 SS 的指令位于函数入口，以便将实际故障 RIP 与预期指令地址比较。
 extern "C" void trap_test_load_stack_segment(uint16_t selector);
 asm(
     ".pushsection .text\n"

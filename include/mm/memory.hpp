@@ -6,8 +6,8 @@
 namespace mm {
 
 struct PhysicalRange {
-    uintptr_t base;
-    size_t size;
+    uintptr_t base; // 区间起始物理地址。
+    size_t size;    // 区间字节数，0 表示跳过此条目。
 };
 
 using PhysicalRangeReader = PhysicalRange (*)(size_t index);
@@ -26,7 +26,7 @@ void kfree(void* pointer);
 // 仅释放由分配器占用的页帧。无效地址或重复释放返回 false。
 [[nodiscard]] bool free_frame(uintptr_t physical_address);
 
-// TODO: 实现进程地址空间和用户页映射、权限及回收。
+// TODO: 管理进程的虚拟地址范围和页表根，复用架构层已有的单页映射与回收逻辑。
 class AddressSpace;
 
 }

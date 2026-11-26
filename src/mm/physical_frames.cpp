@@ -10,9 +10,9 @@ constexpr uintptr_t page_mask = page_size - 1;
 constexpr size_t bits_per_byte = 8;
 
 struct FrameRegion {
-    uintptr_t base;
+    uintptr_t base;   // 此区间第一张可分配页帧的物理地址。
     size_t frame_count;
-    uint8_t* bitmap;
+    uint8_t* bitmap;   // 内核虚拟指针。每页一位，0 空闲，1 已分配。
     // 比该下标更小的页帧均已占用。释放较低地址的页帧会把起点移回去。
     size_t first_candidate;
 };
@@ -23,6 +23,7 @@ FrameRegion* regions = nullptr;
 size_t region_count = 0;
 
 PhysicalRange whole_pages(PhysicalRange range) {
+    // 先把区间起点向上对齐，再截掉末尾的不足一页部分，确保只接管完整的页帧。
     const size_t leading = (-range.base) & page_mask;
     if (range.size <= leading) {
         return {};
@@ -74,6 +75,7 @@ bool initialize(size_t range_count, PhysicalRangeReader read_range, uintptr_t di
     }
 
     // 区间互不重叠，元数据最多为每个物理页一份描述符加一个位图字节。
+    // 预留尺寸按原区间估算。扣掉元数据页后，用剩余页帧数建立各自的位图。
     const size_t descriptor_bytes = usable_count * sizeof(FrameRegion);
     const size_t metadata_bytes = (descriptor_bytes + bitmap_bytes + page_mask) & ~page_mask;
     if (metadata_bytes > metadata_range.size || metadata_range.base > UINTPTR_MAX - direct_map_offset) {
@@ -117,6 +119,7 @@ bool initialize(size_t range_count, PhysicalRangeReader read_range, uintptr_t di
 }
 
 bool allocate_frame(uintptr_t& physical_address) {
+    // 区间按起始地址排序，首个空位对应当前物理地址最低的空闲页。
     for (size_t region_index = 0; region_index < region_count; ++region_index) {
         auto& region = regions[region_index];
         for (size_t index = region.first_candidate; index < region.frame_count; ++index) {
@@ -135,6 +138,7 @@ bool allocate_frame(uintptr_t& physical_address) {
 }
 
 bool free_frame(uintptr_t physical_address) {
+    // 位图以页帧起点为索引。页内任意字节地址都不能用来释放页帧。
     if ((physical_address & page_mask) != 0) {
         return false;
     }

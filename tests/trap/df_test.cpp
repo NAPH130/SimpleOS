@@ -27,6 +27,7 @@ extern "C" [[noreturn]] void kernel_main() {
     initialize_trap_test();
     disable_general_protection_gate();
     kprintf_log(LogLevel::DEBUG, "before general protection fault with absent gate\n");
+    // 执行和 #GP 测试相同的非法段加载，此时递送 #GP 会引发第二个异常。
     asm volatile("movw %%cs, %%ax; movw %%ax, %%ss" ::: "rax", "memory");
     unexpected_trap_return();
 }

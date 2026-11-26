@@ -48,7 +48,7 @@ GDT 的第 5、6 项是 Ring 3 的代码段和可写数据段，对应选择子 
 
 `initialize_segments()` 将独立的 16 KiB 内核入口栈的顶部地址写入 `tss.rsp[0]`。用户态异常通过普通异常门切到 Ring 0 时，CPU 从这个 `RSP0` 得到内核栈顶，再把用户态返回现场压到栈上。`#DF` 则使用第一个 IST 表项指定的应急栈。GDT 和 TSS 分别通过 `lgdt` 和 `ltr` 加载。 [GDT 与栈配置](../../src/arch/x86_64/gdt.cpp) · [描述符加载汇编](../../src/arch/x86_64/gdt_load.S) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
-`make test-ring3` 在独立镜像中添加了两张 4 KiB 用户页的映射。代码页从 `0x400000` 起，可读、可执行。栈页从 `0x401000` 起，可读写，开启 NX 时禁止执行。自检复用 Limine 的四级页表，在空闲的低地址表项下接入测试页，保留现有内核映射。用户代码先用 `pushq` 写入自己的栈，再用 `ud2` 触发 CPU 异常。`#UD` 由 CPU 递送，因此使用现有的异常门。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp) · [Limine 引导协议](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md)
+`make test-ring3` 在独立镜像中动态申请并映射两张 4 KiB 用户页。代码页从 `0x400000` 起，可读、可执行。栈页从 `0x401000` 起，可读写，开启 NX 时禁止执行。用户代码先用 `pushq` 写入自己的栈，再用 `ud2` 触发 CPU 异常。`#UD` 由 CPU 递送，因此使用现有的异常门。 [Ring 3 自检源码](../../tests/trap/ring3_test.cpp) · [动态用户页映射](user-paging.md)
 
 日志中的 `CS=0x2b` 和 `SS=0x33` 来自 CPU 保存的用户现场，`RSP=0x401ff8` 对应完成一次 8 字节压栈后的用户栈顶。`on RSP0 stack=yes` 表示整份 `TrapFrame` 位于当前的 16 KiB 内核入口栈内。之后按 `#UD` 的现有诊断流程停机。 [异常诊断实现](../../src/arch/x86_64/trap.cpp) · [构建、运行与验证](../guides/getting-started.md)
 
@@ -63,4 +63,4 @@ IDT 的 `0x80` 号门设置为 `DPL=3`，允许用户程序执行 `int 0x80`。�
 
 `sys_write` 先检查长度和地址范围，再沿当前页表确认每一页都允许用户访问。发送由串口驱动按字节完成，保留百分号、零字节和原始换行。分发器把结果写进 `TrapFrame::rax`，汇编恢复 `RAX` 后执行 `iretq`，用户程序从 `int 0x80` 后继续。对于有效输出目标，零长度写入返回 `0`。无效输出目标返回 `-9`，无效用户缓冲区返回 `-14`，长度超出返回值范围时返回 `-22`，未知调用号返回 `-38`。 [调用约定](../../include/abi/syscall.hpp) · [用户态封装](../../src/user/syscall.cpp) · [内核分发](../../src/kernel/syscall.cpp) · [页表校验](../../src/arch/x86_64/paging.cpp)
 
-`run_user_mode()` 在启动单个用户程序时保存内核栈和调用者需要保留的寄存器。`sys_exit` 恢复这份内核现场，退出状态就是 `run_user_mode()` 的返回值。当前使用单一内核启动现场，测试程序的页由测试镜像预留。接入调度器后，由任务模块负责结束进程、回收资源和选择下一个任务。 [用户态进入与退出](../../src/arch/x86_64/enter_user_mode.S) · [Trap 开发计划](../plan/trap.md)
+`run_user_mode()` 在启动单个用户程序时保存内核栈和调用者需要保留的寄存器。`sys_exit` 恢复这份内核现场，退出状态就是 `run_user_mode()` 的返回值。返回后，自检启动代码清除用户映射并回收页帧。接入调度器后，由任务模块负责结束进程、回收资源和选择下一个任务。 [用户态进入与退出](../../src/arch/x86_64/enter_user_mode.S) · [回收验证](../../tests/trap/syscall_test.cpp) · [Trap 开发计划](../plan/trap.md)

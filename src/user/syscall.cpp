@@ -4,6 +4,7 @@
 
 intptr_t user::sys_write(int fd, const void* buffer, size_t size) {
     uintptr_t result = abi::syscall::write;
+    // +a 表示 RAX 既传入调用号又接收结果。D、S 和 d 固定三个参数寄存器。
     // 陷入内核后可能读取 buffer，memory 约束保持缓冲区写入发生在调用之前。
     asm volatile("int %1" : "+a"(result) : "i"(X86_64_VECTOR_SYSCALL),
                  "D"(static_cast<uintptr_t>(fd)), "S"(buffer), "d"(size) : "memory", "cc");

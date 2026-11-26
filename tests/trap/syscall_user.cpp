@@ -5,6 +5,7 @@
 
 namespace {
 
+// 非零退出状态用来指明哪一步失败。内核自检只接受成功路径的状态 42。
 void check(bool passed, int status) {
     if (!passed) {
         user::sys_exit(status);

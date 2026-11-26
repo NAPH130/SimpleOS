@@ -4,6 +4,7 @@
 
 namespace {
 
+// 链接脚本把请求及两端的标记放在同一段。Limine 在转入 kernel_main 前填好响应指针。
 // 引导器将版本字段置零来确认支持该版本，volatile 保留对此字段的读取。
 __attribute__((used, section(".limine_requests_start")))
 volatile uint64_t requests_start[] = {
@@ -41,6 +42,7 @@ struct MemoryMapEntry {
     uint64_t type;
 };
 
+// entries 指向指针数组。内存区间可能不连续，遍历时必须逐项取指针。
 struct MemoryMapResponse {
     uint64_t revision;
     uint64_t entry_count;
@@ -97,5 +99,6 @@ bool boot::initialize_physical_memory() {
         || !higher_half_direct_map_offset(direct_map_offset)) {
         return false;
     }
+    // 通过按索引读取的回调传递可用区间，内核堆建立前也能扫描两遍。
     return mm::initialize(response->entry_count, usable_range, direct_map_offset);
 }

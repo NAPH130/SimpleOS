@@ -1,4 +1,5 @@
 // 向量、CPU 是否压入错误码、诊断名称。
+// 定义 CPU_EXCEPTION 后包含本表，可生成汇编入口、IDT 安装代码或诊断名称。
 CPU_EXCEPTION(0,  0, "#DE Divide error")
 CPU_EXCEPTION(1,  0, "#DB Debug")
 CPU_EXCEPTION(2,  0, "#NMI Non-maskable interrupt")

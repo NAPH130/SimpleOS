@@ -6,12 +6,17 @@
 #include <drivers/serial.hpp>
 #include <kernel/console.hpp>
 
-inline void initialize_trap_test() {
-    serial::init();
-    if (!boot::limine_base_revision_supported()) {
-        kprintf_log(LogLevel::ERROR, "Unsupported Limine base revision.\n");
+// 每个自检镜像都有自己的 kernel_main。失败时留下串口诊断并停机。
+inline void require_trap_test(bool passed, const char* diagnostic) {
+    if (!passed) {
+        kprintf_log(LogLevel::ERROR, "%s\n", diagnostic);
         x86_64::halt();
     }
+}
+
+inline void initialize_trap_test() {
+    serial::init();
+    require_trap_test(boot::limine_base_revision_supported(), "Unsupported Limine base revision.");
     x86_64::initialize_traps();
 }
 

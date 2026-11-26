@@ -31,6 +31,7 @@ static_assert(sizeof(IdtGate) == 16);
 static_assert(sizeof(IdtRegister) == 10);
 
 alignas(16) IdtGate idt[256]{};
+// 门的 DPL 控制软件 INT 的调用权限。门的 selector 决定进入哪个代码段。
 constexpr uint8_t kernel_interrupt_gate = 0x8e; // P=1，DPL=0，64 位中断门。
 constexpr uint8_t user_interrupt_gate = kernel_interrupt_gate | (3 << 5); // DPL=3。
 

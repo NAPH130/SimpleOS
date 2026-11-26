@@ -4,6 +4,7 @@
 #include <drivers/serial.hpp>
 #include <kernel/console.hpp>
 
+// 用固定的非法指令触发 #UD，脚本可以根据函数入口核对故障位置。
 extern "C" void trap_test_ud2();
 asm(
     ".pushsection .text\n"

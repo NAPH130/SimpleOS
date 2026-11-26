@@ -21,6 +21,7 @@ uint16_t append_absent_stack_descriptor() {
     }
 
     const auto* entries = reinterpret_cast<const uint64_t*>(original.base);
+    // 保留内核正在使用的描述符，只在新表末尾补一项供本次自检加载。
     for (size_t i = 0; i < count; ++i) {
         test_gdt[i] = entries[i];
     }

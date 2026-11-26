@@ -2,7 +2,7 @@
 
 namespace kernel::sync {
 
-// TODO: 使用原子指令实现自旋互斥与内存顺序。
+// 拿不到锁时在当前 CPU 上等待。TODO: 用原子指令取得锁并实现内存顺序。
 class SpinLock {
 public:
     SpinLock();
@@ -13,7 +13,7 @@ public:
     void unlock();
 };
 
-// TODO: 记录锁的所有者，接入调度器的阻塞与唤醒机制。
+// 拿不到锁时让当前任务进入等待。TODO: 记录锁的所有者并接入调度器。
 class Mutex {
 public:
     Mutex();
@@ -31,8 +31,8 @@ public:
     Semaphore(const Semaphore&) = delete;
     Semaphore& operator=(const Semaphore&) = delete;
 
-    void wait();   // P
-    void signal(); // V
+    void wait();   // P 操作，取得一个配额，或等待其他任务释放配额。
+    void signal(); // V 操作，归还一个配额并按需唤醒等待者。
 };
 
 }

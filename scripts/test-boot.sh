@@ -34,6 +34,7 @@ if [ "$status" -ne 124 ]; then
 fi
 
 if [ "$scenario" != boot ]; then
+    # 异常用例从演示日志提取链接后的指令地址。与完整日志比较也会捕获意外输出。
     rip=unknown
     case "$scenario" in
         ud)
@@ -85,7 +86,7 @@ if [ "$scenario" != boot ]; then
             ;;
         syscall)
             exception='System call'
-            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\n')
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\n[\033[32mINFO\033[0m] Dynamic user pages reclaimed.\r\n[\033[32mINFO\033[0m] User mapping rollback verified.\r\n')
             ;;
         frames)
             exception='Physical frame allocator'

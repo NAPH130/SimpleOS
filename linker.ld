@@ -1,6 +1,7 @@
 OUTPUT_FORMAT(elf64-x86-64)
 ENTRY(kernel_main)
 
+/* 这些加载段分别用于协议请求、执行代码、只读常量和可写数据。 */
 PHDRS {
     requests PT_LOAD FLAGS(6);
     text PT_LOAD FLAGS(5);
@@ -16,6 +17,7 @@ SECTIONS {
         KEEP(*(.limine_requests))
         KEEP(*(.limine_requests_end))
     } :requests
+    /* 加载段按页分隔，使引导器可以按段应用页权限。 */
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     .text : { *(.text .text.*) } :text
     . = ALIGN(CONSTANT(MAXPAGESIZE));

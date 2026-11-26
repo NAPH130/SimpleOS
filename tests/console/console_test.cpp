@@ -19,6 +19,7 @@ void expect(const char* name, const char* expected) {
 }
 
 namespace serial {
+// 用宿主机字符串接住内核的输出，测试不需要访问真实的 I/O 端口。
 void put(char character) { output += character; }
 void write(const char* text) { output += text; }
 }

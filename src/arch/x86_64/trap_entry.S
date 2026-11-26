@@ -18,6 +18,7 @@
 #define CPU_EXCEPTION(vector, error, name) trap_entry x86_64_exception_ ## vector, vector, error
 #include <arch/x86_64/exception_vectors.inc>
 #undef CPU_EXCEPTION
+    # INT 0x80 不带硬件错误码，和无错误码异常共用同一份现场布局。
     trap_entry x86_64_syscall_entry, X86_64_VECTOR_SYSCALL
 
 .Ltrap_common:
@@ -46,6 +47,7 @@
     andq $-16, %rsp
     cld
     call trap_dispatch
+    # C++ 可以改写现场中的寄存器槽，例如 RAX 中的系统调用结果。
     movq %rbx, %rsp
 
     popq %r15

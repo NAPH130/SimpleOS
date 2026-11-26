@@ -6,7 +6,7 @@
 namespace {
 void write_unsigned(uintptr_t value, unsigned base, bool uppercase = false) {
     const char* digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
-    // 最多需要 uintptr_t 的位数个数字（加法无需堆内存）。
+    // 基数最小时，数字个数不超过整数的位数。在栈上存放逆序数字可供早期内核使用。
     char buffer[sizeof(uintptr_t) * 8];
     unsigned length = 0;
     do {
@@ -41,6 +41,7 @@ void write_format(const char* format, va_list& args) {
         }
         switch (*format++) {
             case '%': serial::put('%'); break;
+            // 可变参数中的 char 会提升为 int，取出后再还原为字符。
             case 'c': serial::put(static_cast<char>(va_arg(args, int))); break;
             case 's': {
                 const char* value = va_arg(args, const char*);
@@ -98,6 +99,7 @@ void kprintf_log(LogLevel level, const char* format, ...) {
         default:
             return;
     }
+    // ANSI 复位放在右方括号前，日志正文使用终端默认颜色。
     serial::write("\x1b[0m] ");
 
     va_list args;

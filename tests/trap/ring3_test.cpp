@@ -18,6 +18,7 @@ asm(
 
 extern "C" [[noreturn]] void kernel_main() {
     initialize_trap_test();
+    require_trap_test(boot::initialize_physical_memory(), "Cannot initialize physical memory.");
 
     // 测试指令进入 Ring 3 后通过 pushq 写入用户栈，再用 ud2 触发 #UD。
     if (!user_pages::prepare(ring3_program_start, ring3_program_end)) {

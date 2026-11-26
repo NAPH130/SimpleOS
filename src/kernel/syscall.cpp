@@ -20,11 +20,13 @@ intptr_t write(uint64_t fd, uintptr_t buffer, size_t size) {
     if (!x86_64::paging::user_buffer_readable(buffer, size)) {
         return abi::syscall::bad_address;
     }
+    // CPU 仍使用当前页表。校验后可直接用原用户虚拟地址读出指定长度的字节。
     serial::write_bytes(reinterpret_cast<const char*>(buffer), size);
     return static_cast<intptr_t>(size);
 }
 
 [[noreturn]] void exit(int status) {
+    // 恢复 run_user_mode 的内核调用现场，随后由启动方负责撤销用户映射。
     x86_64::exit_user_mode(status);
     // 通过底层入口直接进入 Ring 3 的程序没有内核调用现场可恢复。
     kprintf_log(LogLevel::INFO, "User program exited with status %d. Halting CPU.\n", status);
@@ -34,6 +36,7 @@ intptr_t write(uint64_t fd, uintptr_t buffer, size_t size) {
 }
 
 void dispatch(x86_64::TrapFrame& frame) {
+    // CS 的低两位是进入中断前的特权级，可用来限制系统调用的来源。
     if ((frame.cs & 3) != 3) {
         frame.rax = abi::syscall::permission_denied;
         return;

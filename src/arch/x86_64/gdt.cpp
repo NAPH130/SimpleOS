@@ -8,7 +8,7 @@ extern "C" void x86_64_load_gdt(const void* descriptor);
 namespace {
 
 struct [[gnu::packed]] TableRegister {
-    uint16_t limit;
+    uint16_t limit; // CPU 读取的表长度上界，等于字节数减一。
     uint64_t base;
 };
 
@@ -32,10 +32,10 @@ alignas(16) Tss tss{};
 alignas(16) uint8_t ring0_entry_stack[16384];
 alignas(16) uint8_t double_fault_stack[8192];
 alignas(16) uint64_t gdt[] = {
-    0,
-    0x00af9b000000ffff, // Ring 0, 64-bit code
-    0x00cf93000000ffff, // Ring 0, writable data
-    0, 0,              // 16-byte TSS descriptor
+    0,                 // 空描述符，保留选择子 0。
+    0x00af9b000000ffff, // Ring 0 的 64 位代码段。
+    0x00cf93000000ffff, // Ring 0 的可写数据段。
+    0, 0,              // 运行时填充的 16 字节 TSS 描述符。
     0x00affb000000ffff, // Ring 3 代码段，DPL=3，L=1，D=0。
     0x00cff3000000ffff, // Ring 3 可写数据段，也可作为用户栈段。
 };
@@ -73,6 +73,7 @@ bool x86_64::on_double_fault_stack(const void* address) {
 }
 
 bool x86_64::on_ring0_entry_stack(const void* address, size_t size) {
+    // 用区间剩余长度检查完整现场，避免 address + size 的地址溢出。
     const auto offset =
         reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(ring0_entry_stack);
     return size <= sizeof(ring0_entry_stack) && offset <= sizeof(ring0_entry_stack) - size;

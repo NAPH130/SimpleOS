@@ -1,5 +1,6 @@
 #include "test_boot.hpp"
 
+// 单独导出访存指令的入口，脚本用它的地址核对 #PF 日志中的 RIP。
 extern "C" void trap_test_read_address(uintptr_t address);
 asm(
     ".pushsection .text\n"

@@ -32,4 +32,5 @@ build/     本地生成的镜像、日志及引导器缓存
 
 - 文档目录与维护方式。 [开发文档索引](docs/README.md)
 - CPU 异常的触发条件、处理流程和诊断字段。 [Trap 功能介绍](docs/architecture/trap.md)
+- 用户页怎样动态分配、写入页表和回收。 [动态用户页映射](docs/architecture/user-paging.md)
 - 接下来的阶段目标和模块待办。 [开发路线](docs/plan/roadmap.md) · [Trap 开发计划](docs/plan/trap.md)

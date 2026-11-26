@@ -42,6 +42,7 @@ void verify_reuse(uintptr_t direct_map) {
 }
 
 void verify_exhaustion() {
+    // 独立镜像会在测试后停机，可以耗尽整个分配器来验证失败与释放后的行为。
     size_t count = 0;
     uintptr_t last = 0;
     uintptr_t frame;

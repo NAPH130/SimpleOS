@@ -73,6 +73,7 @@ exit_user_mode:
     .bss
     .align 8
 .Lkernel_rsp:
+    # 该槽在完成退出后清零。首个用户任务与内核共用当前 CPU 和页表。
     .zero 8
 
     .section .note.GNU-stack,"",@progbits

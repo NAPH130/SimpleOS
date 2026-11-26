@@ -36,8 +36,8 @@ sudo apt install build-essential git xorriso qemu-system-x86
 | `make test-gp` | 只运行 `#GP` 自检，验证第 13 号异常的故障地址和非零硬件错误码。 |
 | `make test-pf` | 核对缺页异常的 `CR2`、`RIP` 和错误码。 |
 | `make test-de`、`make test-ss`、`make test-df` | 分别验证除零、栈段和双重故障，`#DF` 日志确认应急栈。 |
-| `make test-ring3` | 在独立镜像中启动用户态测试代码，验证用户栈写入、`#UD` 和内核入口换栈。 |
-| `make test-syscall` | 验证 Ring 3 通过 `sys_write` 输出、收到返回值、拒绝无效参数，再通过 `sys_exit` 把状态交回内核。 |
+| `make test-ring3` | 用动态分配的用户页验证取指、用户栈写入、`#UD` 和内核入口换栈。 |
+| `make test-syscall` | 验证用户输出、退出、撤销映射与回收，以及页帧耗尽后建表的回滚。 |
 | `make test-frames` | 验证 4 KiB 页帧分配、独立读写、释放复用、无效释放和内存耗尽。日志保存在 `build/tests/frames-test.log`。 |
 | `make clean` | 删除 `build/`，包括引导器缓存和测试日志。 |
 
@@ -60,4 +60,6 @@ Ring 3 自检的日志在 `build/tests/trap-ring3.log`。其中 `RSP` 是用户�
 Ring 3 wrote 100%
 Ring 3 resumed after sys_write
 [INFO] kernel resumed after sys_exit, status=42
+[INFO] Dynamic user pages reclaimed.
+[INFO] User mapping rollback verified.
 ```

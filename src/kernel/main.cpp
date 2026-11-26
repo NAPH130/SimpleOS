@@ -32,6 +32,7 @@ extern "C" [[noreturn]] void kernel_main() {
         asm volatile("int3" ::: "memory");
         kprintf_log(LogLevel::DEBUG, "after int3\n");
 
+        // Limine 已提供页表和直接映射，可以在内核堆建立前初始化物理页帧。
         if (!boot::initialize_physical_memory()) {
             kprintf_log(LogLevel::ERROR, "Physical frame allocator initialization failed.\n");
             x86_64::halt();

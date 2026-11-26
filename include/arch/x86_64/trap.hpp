@@ -21,7 +21,7 @@ struct TrapFrame {
     uint64_t rbx;
     uint64_t rdx;
     uint64_t rcx;
-    uint64_t rax;
+    uint64_t rax;        // 系统调用分发器可修改该槽，把结果带回用户态的 RAX。
     uint64_t vector;     // 汇编入口写入的异常编号，供 C++ 分发。
     uint64_t error_code; // 部分异常由 CPU 压入，其余入口由汇编补 0。
 
@@ -33,7 +33,7 @@ struct TrapFrame {
     uint64_t ss;
 };
 
-// 注册已支持的异常向量并装载 IDT，保持可屏蔽中断关闭。
+// 注册 CPU 异常与 int 0x80 入口，加载 IDT，并保持可屏蔽中断关闭。
 void initialize_traps();
 
 // 由汇编入口调用，frame 指向当前栈上的现场。函数返回后由汇编恢复现场。

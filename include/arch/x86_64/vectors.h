@@ -6,4 +6,5 @@
 #define X86_64_VECTOR_DOUBLE_FAULT 8
 #define X86_64_VECTOR_GENERAL_PROTECTION 13
 #define X86_64_VECTOR_PAGE_FAULT 14
+// SimpleOS 约定的系统调用入口，向量号与 CPU 异常范围分开。
 #define X86_64_VECTOR_SYSCALL 0x80

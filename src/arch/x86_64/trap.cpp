@@ -61,6 +61,7 @@ static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
 extern "C" void trap_dispatch(TrapFrame* frame) {
     switch (frame->vector) {
         case X86_64_VECTOR_SYSCALL:
+            // sys_write 等调用把结果留在 TrapFrame 中，由公共入口恢复给用户。
             kernel::syscall::dispatch(*frame);
             return;
         case X86_64_VECTOR_BREAKPOINT:

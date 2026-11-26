@@ -7,9 +7,11 @@ LD := ld
 BUILD := build
 LIMINE := $(BUILD)/deps/limine
 LIMINE_COMMIT := 7a9013f305de0bea1f6310e76e7baba30499fef0
+# 早期内核自行提供运行环境，异常入口和内核代码共用禁用 red zone 的约定。
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
     -fno-exceptions -fno-rtti -fno-stack-protector -fno-pie -fno-pic \
     -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only -Iinclude
+# 用户自检需要复制到选定的用户虚拟地址，因此用位置无关的代码。
 USER_CXXFLAGS := $(filter-out -fno-pie -mcmodel=kernel,$(CXXFLAGS)) -fpie
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
     src/kernel/syscall.cpp src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp \
@@ -61,6 +63,7 @@ $(BUILD)/tests/trap/syscall_user_blob.o: tests/trap/syscall_user_blob.S $(BUILD)
 	$(CC) -m64 -Wa,-I,$(@D) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(OBJECTS)
+# 自检镜像替换 kernel_main，复用相同的设备驱动、系统调用和内存管理对象。
 $(TRAP_TEST_ELFS): $(BUILD)/tests/trap-%.elf: $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(BUILD)/tests/trap/%_test.o
 $(BUILD)/tests/trap-syscall.elf: $(BUILD)/tests/trap/syscall_user_blob.o
 $(FRAME_TEST_ELF): $(filter-out $(BUILD)/kernel/main.o,$(OBJECTS)) $(FRAME_TEST_OBJECT)
