@@ -15,7 +15,4 @@ void enqueue_ready(Process& process);
 void yield();
 void on_timer_tick();
 
-// TODO: 保存退出码并调度下一个任务，后续回收当前进程资源。
-[[noreturn]] void exit_current(int status);
-
 }

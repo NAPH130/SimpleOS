@@ -1,10 +1,9 @@
 #include <abi/syscall.hpp>
-#include <arch/x86_64/context.hpp>
-#include <arch/x86_64/cpu.hpp>
 #include <arch/x86_64/paging.hpp>
 #include <drivers/serial.hpp>
-#include <kernel/console.hpp>
 #include <kernel/syscall.hpp>
+#include <mm/address_space.hpp>
+#include <task/process.hpp>
 
 namespace kernel::syscall {
 namespace {
@@ -25,12 +24,25 @@ intptr_t write(uint64_t fd, uintptr_t buffer, size_t size) {
     return static_cast<intptr_t>(size);
 }
 
-[[noreturn]] void exit(int status) {
-    // 恢复 run_user_mode 的内核调用现场，随后由启动方负责撤销用户映射。
-    x86_64::exit_user_mode(status);
-    // 通过底层入口直接进入 Ring 3 的程序没有内核调用现场可恢复。
-    kprintf_log(LogLevel::INFO, "User program exited with status %d. Halting CPU.\n", status);
-    x86_64::halt();
+intptr_t allocate(size_t bytes) {
+    auto* space = task::current_address_space();
+    if (space == nullptr) {
+        return abi::syscall::permission_denied;
+    }
+    if (bytes == 0 || bytes > SIZE_MAX - (x86_64::paging::page_size - 1)) {
+        return abi::syscall::invalid_argument;
+    }
+    uintptr_t address;
+    return space->allocate_user(bytes, address)
+        ? static_cast<intptr_t>(address) : abi::syscall::out_of_memory;
+}
+
+intptr_t release(uintptr_t address) {
+    auto* space = task::current_address_space();
+    if (space == nullptr) {
+        return abi::syscall::permission_denied;
+    }
+    return space->release_user(address) ? 0 : abi::syscall::invalid_argument;
 }
 
 }
@@ -48,7 +60,13 @@ void dispatch(x86_64::TrapFrame& frame) {
             frame.rax = write(frame.rdi, frame.rsi, frame.rdx);
             return;
         case abi::syscall::exit:
-            exit(static_cast<int>(frame.rdi));
+            task::exit_current(static_cast<int>(frame.rdi));
+        case abi::syscall::allocate:
+            frame.rax = allocate(frame.rdi);
+            return;
+        case abi::syscall::release:
+            frame.rax = release(frame.rdi);
+            return;
         default:
             frame.rax = abi::syscall::not_implemented;
     }

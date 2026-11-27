@@ -11,6 +11,10 @@ namespace user {
 // 结束当前用户程序，将退出状态交给内核。
 [[noreturn]] void sys_exit(int status);
 
+// 申请页对齐的可读写空间，失败返回 nullptr。sys_free 成功返回 0，失败返回负错误码。
+[[nodiscard]] void* sys_alloc(size_t bytes);
+[[nodiscard]] intptr_t sys_free(void* address);
+
 // TODO: 通过系统调用主动让出 CPU，等待调度器恢复执行。
 void sys_yield();
 

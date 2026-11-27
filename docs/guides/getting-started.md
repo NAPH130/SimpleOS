@@ -37,13 +37,13 @@ sudo apt install build-essential git xorriso qemu-system-x86
 | `make test-pf` | 核对缺页异常的 `CR2`、`RIP` 和错误码。 |
 | `make test-de`、`make test-ss`、`make test-df` | 分别验证除零、栈段和双重故障，`#DF` 日志确认应急栈。 |
 | `make test-ring3` | 用动态分配的用户页验证取指、用户栈写入、`#UD` 和内核入口换栈。 |
-| `make test-syscall` | 验证用户输出、退出、撤销映射与回收，以及页帧耗尽后建表的回滚。 |
-| `make test-frames` | 验证 4 KiB 页帧分配、独立读写、释放复用、无效释放和内存耗尽。日志保存在 `build/tests/frames-test.log`。 |
+| `make test-syscall` | 验证独立页表、用户输出、用户内存分配与释放、正常退出与缺页退出后的回收，以及页帧耗尽时创建地址空间和部分建表的失败路径。 |
+| `make test-frames` | 验证 4 KiB 页帧分配与耗尽，以及内核堆的对齐、拆分、合并、跨页分配和页帧回收。日志保存在 `build/tests/frames-test.log`。 |
 | `make clean` | 删除 `build/`，包括引导器缓存和测试日志。 |
 
 每个 QEMU 自检会在约 15 秒后结束，再检查串口内容。正常启动记录保存在 `build/boot-test.log`，故障自检记录在 `build/tests/trap-<异常名>.log`，例如 `build/tests/trap-pf.log`。 [Makefile](../../Makefile) · [启动测试脚本](../../scripts/test-boot.sh)
 
-页帧分配自检成功时输出 `[INFO] Physical frame allocator self-test passed.`。 [物理页帧分配](../architecture/overview.md#物理页帧分配)
+内核堆和页帧自检通过后分别输出 `[INFO] Kernel heap self-test passed.` 和 `[INFO] Physical frame allocator self-test passed.`。 [内核堆](../architecture/overview.md#内核堆) · [物理页帧分配](../architecture/overview.md#物理页帧分配)
 
 Ring 3 自检的日志在 `build/tests/trap-ring3.log`。其中 `RSP` 是用户栈顶，`on RSP0 stack=yes` 表示异常现场落在内核入口栈。
 
@@ -53,13 +53,17 @@ Ring 3 自检的日志在 `build/tests/trap-ring3.log`。其中 `RSP` 是用户�
 [ERROR] #UD Invalid opcode (vector 6), RIP=0x400002. Halting CPU.
 ```
 
-系统调用自检的日志在 `build/tests/trap-syscall.log`。两行用户输出之间，程序还会检查无效输出目标、未映射地址、内核地址、跨页缓冲区、过大长度和未知调用号。
+系统调用自检的日志在 `build/tests/trap-syscall.log`。两个用户程序先各自建立页表，再顺序运行。它们从相同的虚拟栈地址读到各自的值。第一个程序申请并释放跨页内存，然后以 `42` 退出。第二个程序访问未映射的 `0x1000`，由内核结束。自检在每次返回后检查原页表是否恢复，最后核对两次运行释放的页帧。 [动态用户页映射](../architecture/user-paging.md)
 
 ```text
 [DEBUG] before Ring 3 syscall test
 Ring 3 wrote 100%
 Ring 3 resumed after sys_write
+User memory allocated, released and reused
 [INFO] kernel resumed after sys_exit, status=42
-[INFO] Dynamic user pages reclaimed.
+Process B read its own stack data
+[ERROR] User page fault at 0x1000. Terminating process.
+[INFO] Isolated user address spaces reclaimed after exit and fault.
+[INFO] Virtual address ranges allocated and reused.
 [INFO] User mapping rollback verified.
 ```

@@ -1,6 +1,6 @@
 # 动态用户页映射
 
-SimpleOS 可以在运行时为指定的用户虚拟地址申请一张 4 KiB 物理页帧，建立映射，并在用户程序退出后撤销映射、回收页帧。Ring 3 和系统调用自检已经使用这条路径。以系统调用自检为例，用户代码地址是 `0x400000`，栈页从 `0x401000` 开始。虚拟地址由自检指定，两张页的物理地址在运行时由分配器决定。 [映射接口](../../include/arch/x86_64/paging.hpp) · [自检准备代码](../../tests/trap/user_pages.hpp)
+SimpleOS 的 `AddressSpace` 可以为用户程序选择一段连续虚拟地址，逐页申请 4 KiB 物理页帧并建立映射。每个用户进程可以有自己的页表根。系统调用自检同时准备两个地址空间，让它们分别使用 `0x400000` 的代码页和 `0x401000` 的栈页，依次运行并回收。 [地址空间接口](../../include/mm/address_space.hpp) · [自检准备代码](../../tests/trap/user_pages.hpp)
 
 ## 从物理页帧到虚拟地址
 
@@ -8,16 +8,22 @@ SimpleOS 可以在运行时为指定的用户虚拟地址申请一张 4 KiB 物�
 
 | 对象 | 系统调用自检中的例子 | 谁决定或管理它 |
 | --- | --- | --- |
-| 用户虚拟地址 | 代码 `0x400000`，栈页 `0x401000` | 自检的启动代码选定地址。 |
+| 用户虚拟地址 | 代码 `0x400000`，栈页 `0x401000` | 自检给出可用范围，`AddressSpace::allocate()` 在其中选择地址。 |
 | 物理地址 | 代码和栈各占一张页帧 | `mm::allocate_frame()` 根据位图挑选空闲页帧。 |
 | 页表和权限 | 代码可读、可执行。栈可读写，启用 NX 时禁止执行。 | `map_user_page()` 写入表项，CPU 按表项访问。 |
 
+## 选择虚拟区间和创建页表根
+
+`AddressSpace::create_user(begin, end)` 为按页对齐的区间 `[begin, end)` 创建独立的顶层页表。它清空低半区，复制指向共享内核高半区的顶层表项，并清掉这些表项的用户访问位。分配失败时返回无效对象，后续映射也会失败。需要直接在当前页表做自检时，显式调用 `AddressSpace::borrow_current_for_diagnostics()`，对象析构时只撤销自己建立的映射。 [地址空间实现](../../src/mm/address_space.cpp) · [顶层页表的创建和回收](../../src/arch/x86_64/paging.cpp)
+
+`AddressSpace::allocate()` 把字节数向上取整到页，并按虚拟地址顺序查找能容纳整个申请的空隙。区间记录由内核堆提供。架构层检查目标根的页表，遇到空分支或不可覆盖的分支时，可以按该表项覆盖的整段地址推进。申请 4097 字节会建立两张相邻虚拟页的映射。两张页都成功后才记录整个区间并返回起点。如果中途失败，已建立的映射和分配记录会一起回滚。 `release()` 用区间起点定位记录，再逐页释放整段。 [虚拟区间分配与回滚](../../src/mm/address_space.cpp)
+
 ## 建立一张页的映射
 
-1. **找到当前顶层页表。** `current_page_table()` 从 `CR3` 取出顶层页表的物理地址，再用 Limine 提供的直接映射偏移访问页表内存。代码根据 `CR4.LA57` 选择页表层数。以下算例使用 QEMU 自检的四级页表。
+1. **找到目标顶层页表。** 页表操作使用 `AddressSpace` 指定的物理根，直接修改尚未运行的进程也可以。当前页表接口从 `CR3` 取得根。两种路径都通过 `mm::physical_to_virtual()` 访问页表内存，并根据 `CR4.LA57` 选择页表层数。以下算例使用 QEMU 自检的四级页表。
 2. **沿虚拟地址索引。** `find_user_path()` 每级取虚拟地址中的 9 位算出表项下标，并保存访问路径。从第一个空表项开始补建分支。在已有分支上，只沿本模块创建的用户页表继续。如果目标表项已占用，或者地址属于内核范围或未对齐，映射会失败。
 3. **申请并清零所需的帧。** `map_user_page()` 要一张存数据的页。如果底下缺页表，还会为每个缺失层级申请一张。每张帧都通过直接映射清零。若申请到一半失败，已经申请的帧全部归还，调用者的物理地址输出值保留原值。
-4. **把新分支接进当前页表。** 先给叶子表项写数据页帧和权限，再从底向上接好新页表。最后更新原页表中的空表项，使整条新分支生效。第 9 位是本模块的所有权标记，供后续识别可回收的表项。 [映射与回滚代码](../../src/arch/x86_64/paging.cpp) · [Intel 系统编程手册，页表格式](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+4. **把新分支接进目标页表。** 先给叶子表项写数据页帧和权限，再从底向上接好新页表。最后更新原页表中的空表项，使整条新分支生效。第 9 位是本模块的所有权标记，供后续识别可回收的表项。 [映射与回滚代码](../../src/arch/x86_64/paging.cpp) · [Intel 系统编程手册，页表格式](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
 在空分支里映射 `0x400000` 时，四级页表要新增三张下级页表，以及一张代码页。映射 `0x401000` 时，前三级表项已经建好，两个地址只在最后一级的下标不同，所以只再申请一张栈页。
 
@@ -26,13 +32,17 @@ CR3 → PML4[0] → PDPT[0] → PD[2] → PT[0] → 代码页帧
                                 └─ PT[1] → 栈页帧
 ```
 
-自检从 `map_user_page()` 得到代码页的物理地址后，通过 `direct_map + code_frame` 写入测试指令。用户程序从 `0x400000` 取到同一批指令。写入使用内核的直接映射，用户代码地址保有只读、可执行权限。 [加载测试代码](../../tests/trap/user_pages.hpp)
+自检用 `AddressSpace::physical_frame()` 取得代码页的物理地址，再用 `mm::physical_to_virtual()` 取得内核指针并写入测试指令。用户程序从 `0x400000` 取到同一批指令。写入使用内核的直接映射，用户代码地址保有只读、可执行权限。 [加载测试代码](../../tests/trap/user_pages.hpp)
 
 ## 退出后如何回收
 
-`sys_exit(42)` 恢复 `run_user_mode()` 保存的内核调用现场。返回后，启动这个程序的自检依次调用 `unmap_user_page()` 归还两张用户页。撤下代码页时，栈页还在使用同一张末级页表，代码会保留该页表。撤下最后一张用户页时，空的自有页表页也会逐层回收。 [系统调用自检](../../tests/trap/syscall_test.cpp)
+`task::run_process()` 创建本次运行记录，保存地址空间、原 `CR3` 和返回内核用的 `UserReturnContext`。进入用户态前，汇编把内核栈指针写入这份现场。`sys_exit()` 和受管理用户进程的致命 `#PF` 都经 `task::exit_current()` 使用同一份记录返回。回到 `run_process()` 后，先恢复原 `CR3`，再调用 `AddressSpace::destroy()` 回收映射和页表根。回收后的地址空间失效。缺页退出状态为 `-14`。当前在单 CPU 上一次运行一个进程。 [进程启动和退出](../../src/task/process.cpp) · [缺页分发](../../src/arch/x86_64/trap.cpp)
 
-`unmap_user_page()` 先清除叶子表项，再从底向上检查本模块创建的表。每遇到一张空表，就清除指向它的父表项，同时记下它的物理地址。随后，`invlpg` 使当前 CPU 上这个虚拟地址的旧转换失效，最后才把收集的帧交给 `mm::free_frame()`。这个顺序防止旧虚拟地址继续访问已被重新分配的内存。当前调用方在单 CPU 上串行修改正在使用的页表。 [撤销映射](../../src/arch/x86_64/paging.cpp) · [Intel 系统编程手册，转换缓存失效](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+`unmap_user_page()` 先清除叶子表项，再从底向上检查本模块创建的表。每遇到一张空表，就清除指向它的父表项，同时记下它的物理地址。对当前页表执行 `invlpg` 后才归还这些物理帧。对非活动的页表，重新装载 `CR3` 时清除该进程原先的非全局地址转换。共享的内核高半区下级页表继续由内核持有。 [撤销映射](../../src/arch/x86_64/paging.cpp) · [Intel 系统编程手册，转换缓存失效](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+
+## 用户程序运行时申请和归还内存
+
+`user::sys_alloc(bytes)` 经 `int 0x80` 向当前进程的 `AddressSpace` 请求可读写的连续虚拟区间，成功时返回页对齐指针，失败时返回 `nullptr`。新映射的页帧在交给用户以前清零。`user::sys_free(address)` 只接受本进程通过 `sys_alloc()` 得到的区间起点。内部地址、重复释放和代码或栈地址都会返回 `-22`。进程退出时，内核统一回收仍持有的区间。 [用户态接口](../../include/user/syscall.hpp) · [系统调用分发](../../src/kernel/syscall.cpp)
 
 ## 有多少页表需要遍历
 
@@ -40,6 +50,4 @@ CR3 → PML4[0] → PDPT[0] → PD[2] → PT[0] → 代码页帧
 
 ## QEMU 验证
 
-运行 `make test-ring3` 验证用户能从动态分配的代码页取指，并能向新栈压入数据。运行 `make test-syscall` 验证用户能输出并退出，另有三项针对映射的检查。重复映射会失败，撤掉代码页后栈仍然可读，撤掉最后一页后能取回原来的空闲页帧。自检还只留两张空闲帧，让创建空分支的操作中途失败，确认失败时映射仍为空、两张帧可再次分配。 [自检实现](../../tests/trap/syscall_test.cpp) · [运行与日志](../guides/getting-started.md)
-
-当前由调用方指定虚拟页地址，并使用当前 `CR3`。将来由 `AddressSpace` 选择空闲虚拟区间、管理每个进程的页表根和成片映射。内核堆的字节级分配是同一套页帧分配器的另一个后续用途。 [开发路线](../plan/roadmap.md)
+运行 `make test-ring3` 验证用户能从动态分配的代码页取指，并能向新栈压入数据。运行 `make test-syscall` 验证两个独立地址空间、进程正常退出和缺页退出、用户区间分配和释放。测试会在两个进程的同一栈地址预置不同值，第一个进程回收后，第二个仍应读到自己的值。测试还检查页帧耗尽时创建地址空间会失败、无效对象无法建立映射、部分分配可以回滚，以及退出前后的物理页帧能否完整复用。 [自检实现](../../tests/trap/syscall_test.cpp) · [运行与日志](../guides/getting-started.md)

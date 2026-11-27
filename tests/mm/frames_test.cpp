@@ -17,7 +17,7 @@ void require(bool passed, const char* message) {
     }
 }
 
-void verify_reuse(uintptr_t direct_map) {
+void verify_reuse() {
     uintptr_t first;
     uintptr_t second;
     require(mm::allocate_frame(first) && mm::allocate_frame(second), "Cannot allocate two frames.");
@@ -25,8 +25,8 @@ void verify_reuse(uintptr_t direct_map) {
             "Expected distinct, aligned frames in ascending order.");
 
     // 通过引导器的直接映射写入两个页帧，确认它们提供独立的物理存储。
-    auto* first_value = reinterpret_cast<volatile uint64_t*>(direct_map + first);
-    auto* second_value = reinterpret_cast<volatile uint64_t*>(direct_map + second);
+    auto* first_value = static_cast<volatile uint64_t*>(mm::physical_to_virtual(first));
+    auto* second_value = static_cast<volatile uint64_t*>(mm::physical_to_virtual(second));
     *first_value = 0x123456789abcdef0ull;
     *second_value = 0xfedcba9876543210ull;
     require(*first_value == 0x123456789abcdef0ull && *second_value == 0xfedcba9876543210ull,
@@ -59,6 +59,48 @@ void verify_exhaustion() {
     require(mm::allocate_frame(frame) && frame == last, "Cannot reuse a frame after exhaustion.");
 }
 
+void verify_kernel_heap() {
+    // 2 页载荷加块头需要 3 张页帧。多取一张以检查整个内存段是否归还。
+    uintptr_t before[4];
+    for (auto& frame : before) {
+        require(mm::allocate_frame(frame), "Cannot sample free heap frames.");
+    }
+    for (auto frame : before) {
+        require(mm::free_frame(frame), "Cannot return sampled heap frames.");
+    }
+
+    void* first = mm::kmalloc(128);
+    void* second = mm::kmalloc(128);
+    void* last = mm::kmalloc(3600);
+    require(first != nullptr && second != nullptr && last != nullptr
+            && reinterpret_cast<uintptr_t>(first) % alignof(max_align_t) == 0,
+            "Kernel heap allocations failed or were not aligned.");
+    mm::kfree(first);
+    mm::kfree(second);
+    void* merged = mm::kmalloc(240);
+    require(merged == first, "Kernel heap did not merge adjacent free blocks.");
+    mm::kfree(merged);
+    mm::kfree(last);
+
+    auto* large = static_cast<volatile uint8_t*>(mm::kmalloc(2 * page_size));
+    require(large != nullptr, "Kernel heap could not allocate a multi-page block.");
+    large[0] = 0x12;
+    large[2 * page_size - 1] = 0x34;
+    require(large[0] == 0x12 && large[2 * page_size - 1] == 0x34,
+            "Kernel heap multi-page block is not writable throughout.");
+    mm::kfree(const_cast<uint8_t*>(large));
+    require(mm::kmalloc(0) == nullptr && mm::kmalloc(SIZE_MAX) == nullptr,
+            "Kernel heap accepted an invalid size.");
+    uintptr_t after[4];
+    for (size_t index = 0; index < 4; ++index) {
+        require(mm::allocate_frame(after[index]) && after[index] == before[index],
+                "Kernel heap leaked its pages.");
+    }
+    for (auto frame : after) {
+        require(mm::free_frame(frame), "Cannot return sampled heap frames.");
+    }
+}
+
 }
 
 extern "C" [[noreturn]] void kernel_main() {
@@ -66,9 +108,9 @@ extern "C" [[noreturn]] void kernel_main() {
     x86_64::initialize_traps();
     require(boot::limine_base_revision_supported() && boot::initialize_physical_memory(),
             "Cannot initialize the physical frame allocator.");
-    uintptr_t direct_map;
-    require(boot::higher_half_direct_map_offset(direct_map), "Missing direct map offset.");
-    verify_reuse(direct_map);
+    verify_reuse();
+    verify_kernel_heap();
+    kprintf_log(LogLevel::INFO, "Kernel heap self-test passed.\n");
     verify_exhaustion();
     kprintf_log(LogLevel::INFO, "Physical frame allocator self-test passed.\n");
     x86_64::halt();

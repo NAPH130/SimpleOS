@@ -1,6 +1,6 @@
 # Trap 功能介绍
 
-Trap 模块处理 CPU 异常和系统调用。CPU 通过中断描述符表（IDT）找到入口，内核保存执行现场，再分发给对应的处理函数。SimpleOS 为 `0–31` 号异常向量安装了指向 Ring 0 的入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行，其余 CPU 异常走诊断停机路径。用户程序通过 `int 0x80` 请求内核输出或结束执行。
+Trap 模块处理 CPU 异常和系统调用。CPU 通过中断描述符表（IDT）找到入口，内核保存执行现场，再分发给对应的处理函数。SimpleOS 为 `0–31` 号异常向量安装了指向 Ring 0 的入口，保留向量也有诊断入口。断点 `#BP` 处理后继续执行。`run_process()` 启动的用户程序发生 `#PF` 时，内核结束进程并回收地址空间。用户程序通过 `int 0x80` 请求内核输出、申请或释放内存、结束执行。
 
 ## 运行中何时会进入 Trap
 
@@ -14,7 +14,7 @@ Trap 模块处理 CPU 异常和系统调用。CPU 通过中断描述符表（IDT
 | `#DF`（8）双重故障 | CPU 递送异常时又遇到无法按常规顺序处理的异常组合 | 切到应急栈，记录最小诊断后停机 |
 | `#SS`（12）栈段异常 | 例如内核尝试加载标为不存在的栈段 | 记录故障指令地址和硬件错误码，停机 |
 | `#GP`（13）一般保护异常 | 例如内核加载了不符合要求的段描述符 | 记录故障指令地址和硬件错误码，停机 |
-| `#PF`（14）缺页异常 | 访问未映射的虚拟地址，或访问违反页权限 | 记录故障指令地址、访存地址和硬件错误码，停机 |
+| `#PF`（14）缺页异常 | 访问未映射的虚拟地址，或访问违反页权限 | `run_process()` 启动的用户程序缺页时，打印访存地址并结束进程。内核缺页时记录故障指令地址、访存地址和硬件错误码后停机。 |
 
 其他向量的名称和错误码规则见 [异常向量表](../../include/arch/x86_64/exception_vectors.inc)。
 
@@ -26,13 +26,14 @@ flowchart TD
     B --> C["汇编保存通用寄存器，整理 TrapFrame"]
     C --> D["trap_dispatch 读取向量号并处理"]
     D -->|"断点"| E["恢复寄存器，iretq 返回"]
-    D -->|"其他异常"| F["输出诊断，停机"]
+    D -->|"进程的用户态缺页"| F["结束进程，恢复内核页表并回收资源"]
+    D -->|"其余异常"| G["输出诊断，停机"]
 ```
 
 1. **按向量找入口。** 启动时 `initialize_traps()` 安装异常门并加载 IDT。例如 CPU 触发 `#PF` 时，通过 `IDT[14]` 找到第 14 号入口。`#DF` 的门还配置了 IST（中断栈表），CPU 在保存返回现场前会切到 TSS 指定的独立应急栈。 [IDT 初始化](../../src/arch/x86_64/idt.cpp) · [GDT 和 TSS](../../src/arch/x86_64/gdt.cpp)
 2. **把现场整理到栈上。** CPU 保存 `RIP`、标志寄存器和原栈指针等返回信息。汇编补上向量号并保存通用寄存器。对于 `#GP`、`#PF` 等异常，错误码来自 CPU。对于 `#BP`、`#UD` 等异常，汇编用 `0` 补齐同一个字段。 [汇编入口](../../src/arch/x86_64/trap_entry.S)
 3. **按异常类型处理。** 汇编把现场地址传给 C++ 的 `trap_dispatch(TrapFrame* frame)`。`TrapFrame` 描述数据在栈上的排列，`frame->vector` 就是从这份现场读取向量号。分发函数据此选择断点返回、缺页诊断、双重故障诊断或通用诊断。 [TrapFrame](../../include/arch/x86_64/trap.hpp) · [C++ 分发](../../src/arch/x86_64/trap.cpp)
-4. **恢复执行或停机。** 断点处理返回后，汇编恢复通用寄存器，再用 `iretq` 让 CPU 恢复返回现场。`#BP` 保存的 `RIP` 指向 `int3` 后面。`#UD` 和 `#PF` 保存的 `RIP` 指向故障指令，故障原因仍存在时，返回后会再次触发同一异常。 [汇编返回路径](../../src/arch/x86_64/trap_entry.S) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
+4. **恢复执行、结束进程或停机。** 断点处理返回后，汇编恢复通用寄存器，再用 `iretq` 让 CPU 从 `int3` 后面继续。`#UD` 和 `#PF` 保存的 `RIP` 指向故障指令，故障原因仍存在时，返回后会再次触发同一异常。`run_process()` 启动的用户程序发生缺页后，处理函数调用 `task::exit_current(-14)`，回到内核的进程启动流程。内核缺页仍进入诊断停机。 [汇编返回路径](../../src/arch/x86_64/trap_entry.S) · [缺页处理](../../src/arch/x86_64/trap.cpp) · [Intel 系统编程手册，第 6 章](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
 ## 如何读异常诊断
 
@@ -60,7 +61,9 @@ IDT 的 `0x80` 号门设置为 `DPL=3`，允许用户程序执行 `int 0x80`。�
 | --- | --- | --- | --- |
 | `sys_write(fd, buffer, size)` | `1` | `RDI` 是输出目标，`RSI` 是用户地址，`RDX` 是字节数。首版 `fd=1` 对应 COM1。 | 返回 `RAX` 中的字节数或负错误码。 |
 | `sys_exit(status)` | `2` | `RDI` 的低 32 位是退出状态。 | 结束用户执行，由内核取得退出状态。 |
+| `sys_alloc(bytes)` | `3` | `RDI` 是申请的字节数。 | `RAX` 返回页对齐的用户地址或负错误码。用户态封装在失败时返回 `nullptr`。 |
+| `sys_free(address)` | `4` | `RDI` 是申请返回的区间起点。 | `RAX` 返回 `0` 或负错误码。 |
 
 `sys_write` 先检查长度和地址范围，再沿当前页表确认每一页都允许用户访问。发送由串口驱动按字节完成，保留百分号、零字节和原始换行。分发器把结果写进 `TrapFrame::rax`，汇编恢复 `RAX` 后执行 `iretq`，用户程序从 `int 0x80` 后继续。对于有效输出目标，零长度写入返回 `0`。无效输出目标返回 `-9`，无效用户缓冲区返回 `-14`，长度超出返回值范围时返回 `-22`，未知调用号返回 `-38`。 [调用约定](../../include/abi/syscall.hpp) · [用户态封装](../../src/user/syscall.cpp) · [内核分发](../../src/kernel/syscall.cpp) · [页表校验](../../src/arch/x86_64/paging.cpp)
 
-`run_user_mode()` 在启动单个用户程序时保存内核栈和调用者需要保留的寄存器。`sys_exit` 恢复这份内核现场，退出状态就是 `run_user_mode()` 的返回值。返回后，自检启动代码清除用户映射并回收页帧。接入调度器后，由任务模块负责结束进程、回收资源和选择下一个任务。 [用户态进入与退出](../../src/arch/x86_64/enter_user_mode.S) · [回收验证](../../tests/trap/syscall_test.cpp) · [Trap 开发计划](../plan/trap.md)
+`task::run_process()` 保存原 `CR3`，切进进程页表，再把本次运行的 `UserReturnContext` 传给 `run_user_mode()` 并进入 Ring 3。汇编把调用约定要求保留的寄存器压到原内核栈，并把栈指针写入传入的现场。`sys_exit` 和用户态缺页都通过 `task::exit_current()` 找回这份现场，让汇编从原内核栈继续。回到 `run_process()` 后，先恢复原 `CR3`，再释放进程的用户页和页表，最后交回退出状态。 [进程启动与退出](../../src/task/process.cpp) · [用户态进入与退出](../../src/arch/x86_64/enter_user_mode.S) · [回收验证](../../tests/trap/syscall_test.cpp)

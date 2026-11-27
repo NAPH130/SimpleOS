@@ -1,6 +1,5 @@
 #include <arch/x86_64/paging.hpp>
 #include <arch/x86_64/cpu.hpp>
-#include <boot/limine.hpp>
 #include <kernel/console.hpp>
 #include <mm/memory.hpp>
 
@@ -15,11 +14,11 @@ constexpr uint64_t user_page_flags = page_present | page_user;
 constexpr uint64_t large_page = 1ull << 7;
 // 位 9 由软件使用。在本模块创建的表项中，它表示对应帧由页帧分配器提供。
 constexpr uint64_t owned_entry = 1ull << 9;
+constexpr uint64_t owned_leaf_flags = user_page_flags | owned_entry;
 constexpr uint64_t owned_table_flags = user_page_flags | page_writable | owned_entry;
 
-struct CurrentPageTable {
-    uintptr_t root;       // CR3 中顶层页表的物理地址。
-    uintptr_t direct_map; // 物理页加此偏移后可由内核读写。
+struct PageTable {
+    uintptr_t root;       // 顶层页表的物理地址，可与当前 CR3 不同。
     unsigned root_shift;  // 四级页表为 39，五级页表为 48。
 
     uintptr_t user_limit() const {
@@ -27,7 +26,7 @@ struct CurrentPageTable {
     }
 
     uint64_t* entries(uintptr_t physical_address) const {
-        return reinterpret_cast<uint64_t*>(direct_map + physical_address);
+        return static_cast<uint64_t*>(mm::physical_to_virtual(physical_address));
     }
 };
 
@@ -48,16 +47,14 @@ uintptr_t read_cr4() {
     return cr4;
 }
 
-bool current_page_table(uintptr_t cr4, CurrentPageTable& table) {
-    if (!boot::higher_half_direct_map_offset(table.direct_map)) {
+bool page_table_for(uintptr_t root, uintptr_t cr4, PageTable& table) {
+    if (table.entries(root) == nullptr) {
         return false;
     }
     constexpr uintptr_t la57 = 1ull << 12;
     table.root_shift = (cr4 & la57) != 0 ? 48 : 39;
 
-    uintptr_t cr3;
-    asm volatile("mov %%cr3, %0" : "=r"(cr3) : : "memory");
-    table.root = cr3 & page_address_mask;
+    table.root = root;
     return true;
 }
 
@@ -65,7 +62,7 @@ bool is_large_page(uint64_t entry, unsigned shift) {
     return (shift == 21 || shift == 30) && (entry & large_page) != 0;
 }
 
-bool user_page_present(const CurrentPageTable& table, uintptr_t address) {
+bool user_page_present(const PageTable& table, uintptr_t address) {
     uintptr_t physical_table = table.root;
     for (unsigned shift = table.root_shift; ; shift -= index_bits) {
         const uint64_t entry = table.entries(physical_table)[page_index(address, shift)];
@@ -80,7 +77,7 @@ bool user_page_present(const CurrentPageTable& table, uintptr_t address) {
     }
 }
 
-bool find_user_path(const CurrentPageTable& table, uintptr_t address, PagePath& path) {
+bool find_user_path(const PageTable& table, uintptr_t address, PagePath& path) {
     if (address == 0 || address >= table.user_limit() || (address & (page_size - 1)) != 0) {
         return false;
     }
@@ -99,6 +96,11 @@ bool find_user_path(const CurrentPageTable& table, uintptr_t address, PagePath& 
         }
         physical_table = entry & page_address_mask;
     }
+}
+
+bool find_owned_leaf(const PageTable& table, uintptr_t address, PagePath& path) {
+    return find_user_path(table, address, path) && path.shift == page_shift
+        && (path.last() & owned_leaf_flags) == owned_leaf_flags;
 }
 
 uint64_t data_page_flags() {
@@ -136,6 +138,86 @@ void release_frames(const uintptr_t* frames, size_t count) {
 
 }
 
+uintptr_t read_cr3() {
+    uintptr_t cr3;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3) : : "memory");
+    return cr3;
+}
+
+void write_cr3(uintptr_t value) {
+    // 每次显式切换都允许 CPU 清除旧的非全局转换。
+    asm volatile("mov %0, %%cr3" : : "r"(value) : "memory");
+}
+
+uintptr_t current_page_table_root() {
+    return read_cr3() & page_address_mask;
+}
+
+bool create_user_page_table(uintptr_t& root) {
+    PageTable kernel;
+    uintptr_t frame;
+    if (!page_table_for(current_page_table_root(), read_cr4(), kernel) || !mm::allocate_frame(frame)) {
+        return false;
+    }
+
+    auto* entries = kernel.entries(frame);
+    const auto* kernel_entries = kernel.entries(kernel.root);
+    constexpr size_t half = entries_per_table / 2;
+    for (size_t index = 0; index < half; ++index) {
+        entries[index] = 0;
+    }
+    for (size_t index = half; index < entries_per_table; ++index) {
+        // 只复制顶层引用，内核高半区的下级页表保持共享。用户权限从顶层禁止。
+        entries[index] = kernel_entries[index] & ~page_user;
+    }
+    root = frame;
+    return true;
+}
+
+bool destroy_user_page_table(uintptr_t root) {
+    PageTable table;
+    if (root == current_page_table_root() || !page_table_for(root, read_cr4(), table)) {
+        return false;
+    }
+    const auto* entries = table.entries(root);
+    for (size_t index = 0; index < entries_per_table / 2; ++index) {
+        if (entries[index] != 0) {
+            return false;
+        }
+    }
+    return mm::free_frame(root);
+}
+
+bool find_user_range(uintptr_t begin, uintptr_t end, size_t size, uintptr_t& virtual_address) {
+    return find_user_range(current_page_table_root(), begin, end, size, virtual_address);
+}
+
+bool find_user_range(uintptr_t root, uintptr_t begin, uintptr_t end, size_t size,
+                     uintptr_t& virtual_address) {
+    PageTable table;
+    if (begin == 0 || begin >= end || size == 0 || size > end - begin
+        || ((begin | end | size) & (page_size - 1)) != 0
+        || !page_table_for(root, read_cr4(), table) || end > table.user_limit()) {
+        return false;
+    }
+
+    uintptr_t start = begin;
+    for (uintptr_t cursor = begin; cursor < end && size <= end - start;) {
+        PagePath path;
+        const bool available = find_user_path(table, cursor, path) && path.last() == 0;
+        // 空表项覆盖的整段都可用。遇到本模块不能修改的分支，也按它的覆盖范围跳过。
+        const uintptr_t span = uintptr_t{1} << path.shift;
+        cursor = (cursor & ~(span - 1)) + span;
+        if (!available) {
+            start = cursor;
+        } else if (cursor - start >= size) {
+            virtual_address = start;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool user_buffer_readable(uintptr_t address, size_t size) {
     if (size == 0) {
         return true;
@@ -144,9 +226,9 @@ bool user_buffer_readable(uintptr_t address, size_t size) {
     const uintptr_t cr4 = read_cr4();
     constexpr uintptr_t smap = 1ull << 21;
     constexpr uintptr_t pke = 1ull << 22;
-    CurrentPageTable table;
+    PageTable table;
     // 当前内核直接读取用户指针，启用 SMAP 或保护键后需要专门的用户访问路径。
-    if ((cr4 & (smap | pke)) != 0 || !current_page_table(cr4, table)) {
+    if ((cr4 & (smap | pke)) != 0 || !page_table_for(current_page_table_root(), cr4, table)) {
         return false;
     }
     const uintptr_t user_limit = table.user_limit();
@@ -165,9 +247,14 @@ bool user_buffer_readable(uintptr_t address, size_t size) {
 }
 
 bool map_user_page(uintptr_t virtual_address, UserPageAccess access, uintptr_t& physical_address) {
-    CurrentPageTable table;
+    return map_user_page(current_page_table_root(), virtual_address, access, physical_address);
+}
+
+bool map_user_page(uintptr_t root, uintptr_t virtual_address, UserPageAccess access,
+                   uintptr_t& physical_address) {
+    PageTable table;
     PagePath path;
-    if (!current_page_table(read_cr4(), table) || !find_user_path(table, virtual_address, path)
+    if (!page_table_for(root, read_cr4(), table) || !find_user_path(table, virtual_address, path)
         || path.last() != 0) {
         return false;
     }
@@ -187,7 +274,7 @@ bool map_user_page(uintptr_t virtual_address, UserPageAccess access, uintptr_t& 
         }
     }
 
-    uint64_t entry = frames[0] | user_page_flags | owned_entry;
+    uint64_t entry = frames[0] | owned_leaf_flags;
     if (access == UserPageAccess::read_write) {
         entry |= data_page_flags();
     }
@@ -198,17 +285,21 @@ bool map_user_page(uintptr_t virtual_address, UserPageAccess access, uintptr_t& 
         entry = frames[index] | owned_table_flags;
     }
     path.last() = entry;
-    invalidate_page(virtual_address);
+    if (root == current_page_table_root()) {
+        invalidate_page(virtual_address);
+    }
     physical_address = frames[0];
     return true;
 }
 
 bool unmap_user_page(uintptr_t virtual_address) {
-    CurrentPageTable table;
+    return unmap_user_page(current_page_table_root(), virtual_address);
+}
+
+bool unmap_user_page(uintptr_t root, uintptr_t virtual_address) {
+    PageTable table;
     PagePath path;
-    constexpr uint64_t owned_leaf = user_page_flags | owned_entry;
-    if (!current_page_table(read_cr4(), table) || !find_user_path(table, virtual_address, path)
-        || path.shift != page_shift || (path.last() & owned_leaf) != owned_leaf) {
+    if (!page_table_for(root, read_cr4(), table) || !find_owned_leaf(table, virtual_address, path)) {
         return false;
     }
 
@@ -227,8 +318,24 @@ bool unmap_user_page(uintptr_t virtual_address) {
     }
 
     // 先撤掉叶子和空分支，再让旧转换失效。此后才能把物理帧交给其他调用者。
-    invalidate_page(virtual_address);
+    if (root == current_page_table_root()) {
+        invalidate_page(virtual_address);
+    }
     release_frames(frames, count);
+    return true;
+}
+
+bool user_page_frame(uintptr_t virtual_address, uintptr_t& physical_address) {
+    return user_page_frame(current_page_table_root(), virtual_address, physical_address);
+}
+
+bool user_page_frame(uintptr_t root, uintptr_t virtual_address, uintptr_t& physical_address) {
+    PageTable table;
+    PagePath path;
+    if (!page_table_for(root, read_cr4(), table) || !find_owned_leaf(table, virtual_address, path)) {
+        return false;
+    }
+    physical_address = path.last() & page_address_mask;
     return true;
 }
 

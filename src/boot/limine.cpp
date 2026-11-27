@@ -83,22 +83,12 @@ bool boot::limine_base_revision_supported() {
     return base_revision[2] == 0;
 }
 
-bool boot::higher_half_direct_map_offset(uintptr_t& offset) {
-    const auto* response = hhdm_request.response;
-    if (response == nullptr) {
-        return false;
-    }
-    offset = response->offset;
-    return true;
-}
-
 bool boot::initialize_physical_memory() {
     const auto* response = memory_map_request.response;
-    uintptr_t direct_map_offset;
-    if (response == nullptr || response->entries == nullptr
-        || !higher_half_direct_map_offset(direct_map_offset)) {
+    const auto* direct_map = hhdm_request.response;
+    if (response == nullptr || response->entries == nullptr || direct_map == nullptr) {
         return false;
     }
     // 通过按索引读取的回调传递可用区间，内核堆建立前也能扫描两遍。
-    return mm::initialize(response->entry_count, usable_range, direct_map_offset);
+    return mm::initialize(response->entry_count, usable_range, direct_map->offset);
 }

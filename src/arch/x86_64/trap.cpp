@@ -4,6 +4,7 @@
 #include <arch/x86_64/vectors.h>
 #include <kernel/console.hpp>
 #include <kernel/syscall.hpp>
+#include <task/process.hpp>
 #include <stddef.h>
 
 namespace x86_64 {
@@ -30,6 +31,11 @@ static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
         // RIP 定位出错的指令，CR2 记录它试图访问的地址。
         // 后续缺页会覆盖 CR2，因此在打印前先读取它。
         asm volatile("mov %%cr2, %0" : "=r"(fault_address));
+        if ((frame.cs & 3) == 3 && task::current_address_space() != nullptr) {
+            kprintf_log(LogLevel::ERROR, "User page fault at %p. Terminating process.\n",
+                        reinterpret_cast<void*>(fault_address));
+            task::exit_current(task::page_fault_status);
+        }
     }
 
     // CPU 保存的 CS 低两位给出异常发生前的特权级，frame 的地址给出实际使用的内核栈。
@@ -52,7 +58,7 @@ static_assert(sizeof(exception_names) / sizeof(exception_names[0]) == 32);
         kprintf_log(LogLevel::ERROR, "%s (vector %u), error=0x%x, RIP=%p. Halting CPU.\n",
                     name, vector, error, rip);
     }
-    // 当前故障处理策略是诊断后停机。未修复的故障在原址重试会再次触发。
+    // 内核故障和单独的异常诊断走停机路径。
     halt();
 }
 

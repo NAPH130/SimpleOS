@@ -39,7 +39,8 @@ extern "C" [[noreturn]] void kernel_main() {
         }
         kprintf_log(LogLevel::INFO, "Physical frame allocator initialized.\n");
 
-        // TODO: 初始化内核堆及任务调度。
+        // 内核堆按需从已初始化的分配器取页。
+        // TODO: 初始化任务调度。
         kprintf_log(LogLevel::INFO, "Minimal kernel ready. Halting CPU.\n");
     } else {
         kprintf_log(LogLevel::ERROR, "Unsupported Limine base revision.\n");

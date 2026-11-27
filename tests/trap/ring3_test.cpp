@@ -21,15 +21,16 @@ extern "C" [[noreturn]] void kernel_main() {
     require_trap_test(boot::initialize_physical_memory(), "Cannot initialize physical memory.");
 
     // 测试指令进入 Ring 3 后通过 pushq 写入用户栈，再用 ud2 触发 #UD。
-    if (!user_pages::prepare(ring3_program_start, ring3_program_end)) {
-        kprintf_log(LogLevel::ERROR, "Cannot prepare Ring 3 test pages.\n");
-        x86_64::halt();
-    }
+    auto space = mm::AddressSpace::borrow_current_for_diagnostics(user_pages::arena_begin,
+                                                                  user_pages::arena_end);
+    user_pages::ProgramPages pages;
+    require_trap_test(user_pages::prepare(space, ring3_program_start, ring3_program_end, pages),
+                      "Cannot prepare Ring 3 test pages.");
 
     const auto program_start = reinterpret_cast<uintptr_t>(ring3_program_start);
     const auto fault_offset = reinterpret_cast<uintptr_t>(ring3_program_fault) - program_start;
     kprintf_log(LogLevel::DEBUG, "before entering Ring 3, expected RIP=%p, RSP=%p\n",
-                reinterpret_cast<void*>(user_pages::code_address + fault_offset),
-                reinterpret_cast<void*>(user_pages::stack_top - sizeof(uint64_t)));
-    x86_64::enter_user_mode(user_pages::code_address, user_pages::stack_top);
+                reinterpret_cast<void*>(pages.entry + fault_offset),
+                reinterpret_cast<void*>(pages.stack_top() - sizeof(uint64_t)));
+    x86_64::enter_user_mode(pages.entry, pages.stack_top());
 }

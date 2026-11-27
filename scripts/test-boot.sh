@@ -86,11 +86,11 @@ if [ "$scenario" != boot ]; then
             ;;
         syscall)
             exception='System call'
-            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\n[\033[32mINFO\033[0m] Dynamic user pages reclaimed.\r\n[\033[32mINFO\033[0m] User mapping rollback verified.\r\n')
+            expected_logs=$(printf '[\033[34mDEBUG\033[0m] before Ring 3 syscall test\r\nRing 3 wrote 100%%\r\nRing 3 resumed after sys_write\r\nUser memory allocated, released and reused\r\n[\033[32mINFO\033[0m] kernel resumed after sys_exit, status=42\r\nProcess B read its own stack data\r\n[\033[31mERROR\033[0m] User page fault at 0x1000. Terminating process.\r\n[\033[32mINFO\033[0m] Isolated user address spaces reclaimed after exit and fault.\r\n[\033[32mINFO\033[0m] Virtual address ranges allocated and reused.\r\n[\033[32mINFO\033[0m] User mapping rollback verified.\r\n')
             ;;
         frames)
             exception='Physical frame allocator'
-            expected_logs=$(printf '[\033[32mINFO\033[0m] Physical frame allocator self-test passed.\r\n')
+            expected_logs=$(printf '[\033[32mINFO\033[0m] Kernel heap self-test passed.\r\n[\033[32mINFO\033[0m] Physical frame allocator self-test passed.\r\n')
             ;;
     esac
     if [ -z "$rip" ] || [ "$(cat "$log")" != "$expected_logs" ]; then

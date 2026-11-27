@@ -15,7 +15,8 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -g -ffreestanding \
 USER_CXXFLAGS := $(filter-out -fno-pie -mcmodel=kernel,$(CXXFLAGS)) -fpie
 SOURCES := src/boot/limine.cpp src/kernel/main.cpp src/kernel/console.cpp src/drivers/serial.cpp \
     src/kernel/syscall.cpp src/arch/x86_64/gdt.cpp src/arch/x86_64/idt.cpp \
-    src/arch/x86_64/paging.cpp src/arch/x86_64/trap.cpp src/mm/physical_frames.cpp
+    src/arch/x86_64/paging.cpp src/arch/x86_64/trap.cpp src/mm/physical_frames.cpp \
+    src/mm/address_space.cpp src/mm/kernel_heap.cpp src/task/process.cpp
 ASM_SOURCES := src/arch/x86_64/trap_entry.S src/arch/x86_64/gdt_load.S \
     src/arch/x86_64/enter_user_mode.S
 OBJECTS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SOURCES)) \

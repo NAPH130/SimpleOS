@@ -21,6 +21,7 @@ static_assert(sizeof(FrameRegion) + 1 < page_size);
 
 FrameRegion* regions = nullptr;
 size_t region_count = 0;
+uintptr_t direct_map_base = 0;
 
 PhysicalRange whole_pages(PhysicalRange range) {
     // 先把区间起点向上对齐，再截掉末尾的不足一页部分，确保只接管完整的页帧。
@@ -59,7 +60,8 @@ bool initialize(size_t range_count, PhysicalRangeReader read_range, uintptr_t di
         if (range.size == 0) {
             continue;
         }
-        if (range.base < previous_end) {
+        if (range.base < previous_end || range.base + range.size - 1 > UINTPTR_MAX - direct_map_offset
+            || range.base + direct_map_offset == 0) {
             return false;
         }
 
@@ -115,24 +117,53 @@ bool initialize(size_t range_count, PhysicalRangeReader read_range, uintptr_t di
 
     regions = descriptors;
     region_count = managed_count;
+    direct_map_base = direct_map_offset;
     return true;
 }
 
+void* physical_to_virtual(uintptr_t physical_address) {
+    if (regions == nullptr || physical_address > UINTPTR_MAX - direct_map_base) {
+        return nullptr;
+    }
+    return reinterpret_cast<void*>(direct_map_base + physical_address);
+}
+
 bool allocate_frame(uintptr_t& physical_address) {
-    // 区间按起始地址排序，首个空位对应当前物理地址最低的空闲页。
+    return allocate_contiguous_frames(1, physical_address);
+}
+
+bool allocate_contiguous_frames(size_t count, uintptr_t& physical_address) {
+    if (count == 0) {
+        return false;
+    }
+    // 连续的帧必须位于同一可用区间。找到整个空闲段之后才置位。
     for (size_t region_index = 0; region_index < region_count; ++region_index) {
         auto& region = regions[region_index];
+        if (count > region.frame_count - region.first_candidate) {
+            continue;
+        }
+        size_t run = 0;
+        size_t first_free = region.frame_count;
         for (size_t index = region.first_candidate; index < region.frame_count; ++index) {
-            uint8_t& byte = region.bitmap[index / bits_per_byte];
-            const uint8_t mask = frame_mask(index);
-            if ((byte & mask) == 0) {
-                byte |= mask;
-                region.first_candidate = index + 1;
-                physical_address = region.base + index * page_size;
+            if ((region.bitmap[index / bits_per_byte] & frame_mask(index)) != 0) {
+                run = 0;
+                continue;
+            }
+            if (first_free == region.frame_count) {
+                first_free = index;
+            }
+            if (++run == count) {
+                const size_t start = index + 1 - count;
+                for (size_t used = start; used <= index; ++used) {
+                    region.bitmap[used / bits_per_byte] |= frame_mask(used);
+                }
+                // 保留较低地址的零散空闲页，单页申请仍可找到它们。
+                region.first_candidate = first_free == start ? index + 1 : first_free;
+                physical_address = region.base + start * page_size;
                 return true;
             }
         }
-        region.first_candidate = region.frame_count;
+        region.first_candidate = first_free;
     }
     return false;
 }

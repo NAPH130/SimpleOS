@@ -34,46 +34,36 @@ enter_user_mode:
     .global run_user_mode
     .type run_user_mode, @function
 run_user_mode:
-    # 保存 C++ 调用者依赖的寄存器。参数 rdi 和 rsi 直接交给 enter_user_mode。
+    # 保存 C++ 调用者依赖的寄存器，把原内核栈指针写入调用者传来的现场。
     pushq %rbp
     pushq %rbx
     pushq %r12
     pushq %r13
     pushq %r14
     pushq %r15
-    movq %rsp, .Lkernel_rsp(%rip)
+    movq %rsp, (%rdi)
+    movq %rsi, %rdi
+    movq %rdx, %rsi
     jmp enter_user_mode
     .size run_user_mode, .-run_user_mode
 
     .global exit_user_mode
     .type exit_user_mode, @function
 exit_user_mode:
-    movq .Lkernel_rsp(%rip), %rdx
-    testq %rdx, %rdx
-    jz .Lno_user_launch
-
-    # 已在 Ring 0。丢弃这次系统调用的栈帧，恢复原内核栈并返回退出状态。
-    movq $0, .Lkernel_rsp(%rip)
-    movq %rdx, %rsp
+    # 已在 Ring 0。放弃当前 Trap 的栈帧，从传入的现场恢复原内核栈。
+    movq (%rdi), %rsp
     movw $X86_64_KERNEL_DATA_SELECTOR, %dx
     movw %dx, %ss
     movw %dx, %ds
     movw %dx, %es
-    movl %edi, %eax
+    movl %esi, %eax
     popq %r15
     popq %r14
     popq %r13
     popq %r12
     popq %rbx
     popq %rbp
-.Lno_user_launch:
     ret
     .size exit_user_mode, .-exit_user_mode
-
-    .bss
-    .align 8
-.Lkernel_rsp:
-    # 该槽在完成退出后清零。首个用户任务与内核共用当前 CPU 和页表。
-    .zero 8
 
     .section .note.GNU-stack,"",@progbits

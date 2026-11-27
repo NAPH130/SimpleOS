@@ -32,7 +32,7 @@ SimpleOS 从虚拟机启动，入口是 `kernel_main()`。它使用 **freestandi
 
 **当前权限。** CPU 在内核态（Ring 0）可以执行管理机器的操作，例如加载 IDT。在用户态（Ring 3）执行时，CPU 限制特权指令和内存访问。两种状态都由同一套 CPU 指令执行机制支撑，硬件根据当前特权级和访问对象的权限决定这次操作是否允许。内核可通过预先配置的入口接住异常或服务请求。 [Intel 系统编程手册，保护机制与中断处理](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf)
 
-代码里的指针通常表示**虚拟地址**。CPU 根据当前页表把它转换成物理地址，并检查是否允许这次访问。例如将虚拟页 `0x400000` 映射到一个物理页框后，程序可通过 `0x400008` 访问那个页框内偏移为 8 的字节。不同进程可以有不同页表，于是它们使用同一个虚拟地址时，可以读到不同的物理内存。Limine 目前负责设置启动所需的映射，SimpleOS 后续的内存管理模块会建立和维护自己的映射。 [Intel 系统编程手册，分页](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf) · [内存管理接口](../../include/mm/memory.hpp)
+代码里的指针通常表示**虚拟地址**。CPU 根据当前页表把它转换成物理地址，并检查是否允许这次访问。例如将虚拟页 `0x400000` 映射到一个物理页框后，程序可通过 `0x400008` 访问那个页框内偏移为 8 的字节。Limine 设置启动所需的映射，SimpleOS 为每个进程建立独立的用户映射。两个进程访问同一个虚拟地址时，CPU 可以根据各自的页表找到不同的物理页帧。 [Intel 系统编程手册，分页](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf) · [动态用户页映射](../architecture/user-paging.md)
 
 ## 3. GDT、IDT、TSS 和 TrapFrame 分别存什么
 
@@ -72,7 +72,7 @@ Ring 3 程序触发异常后，普通中断门可以把执行切到 Ring 0。CPU
 
 ## 5. 怎样从这里走到第一个用户程序
 
-SimpleOS 的独立自检已经验证两件事。`make test-ring3` 观察用户程序发生异常后怎样换到内核栈。`make test-syscall` 观察用户程序怎样请求内核输出，继续执行，然后退出。 [运行与验证](getting-started.md)
+`make test-ring3` 观察用户程序发生异常后怎样换到内核栈。`make test-syscall` 在独立页表中顺序运行两个程序，观察用户程序怎样向内核请求输出和内存，以及内核怎样在退出后回收进程。 [运行与验证](getting-started.md)
 
 1. **准备指令和栈。** 自检通过页帧分配器取得独立的代码页和栈页，并把它们映射到用户虚拟地址 `0x400000` 和 `0x401000`。页表记录访问权限，Ring 3 可以从代码页取指，也可以向栈页写入数据。 [动态用户页映射](../architecture/user-paging.md) · [Ring 3 自检源码](../../tests/trap/ring3_test.cpp)
 2. **第一次进入 Ring 3。** `enter_user_mode()` 在内核栈上填好用户 `RIP`、`RSP`、`CS`、`SS` 和 `RFLAGS`，再用异常返回指令 `iretq` 读取这份现场。CPU 依照这些值进入 Ring 3，执行 `pushq` 和 `ud2`。随后 CPU 递送 `#UD`，使用 TSS 的 `RSP0` 换回内核栈。 [用户态入口汇编](../../src/arch/x86_64/enter_user_mode.S)
@@ -91,13 +91,13 @@ SimpleOS 的独立自检已经验证两件事。`make test-ring3` 观察用户�
 | 锁和信号量 | 保护共享数据。自旋锁用原子操作竞争锁，阻塞式互斥锁和信号量需要任务等待与唤醒。 | 两个任务反复更新同一个余额，运行结果符合预期。 [同步接口](../../include/sync/primitives.hpp) |
 | 文件系统和程序装载 | 文件系统提供读取接口。装载器读取 ELF 程序头，准备代码和数据映射，再从 ELF 入口启动用户程序。 | 先读出一个文件，再从文件装载并运行用户程序。 [文件系统接口](../../include/fs/vfs.hpp) · [ELF 装载接口](../../include/loader/elf.hpp) |
 
-这些功能有各自的依赖。当前用户态自检已经能动态分配代码页和栈页，并在退出时回收。后续的进程地址空间会负责选择虚拟区间并持有自己的页表。定时器中断也可以先单独验证，让处理函数每次中断只增加计数，等任务切换跑通后再用于抢占。 [开发路线与阶段验收](../plan/roadmap.md) · [Trap 开发计划](../plan/trap.md)
+两个自检进程各有自己的页表，都把用户栈映射到从 `0x401000` 开始的位置。它们读到各自栈里的数据，退出后由内核拆除各自的映射并回收物理页。定时器中断可以先单独验证，让处理函数每次中断只增加计数，等任务切换跑通后再用于抢占。 [进程自检](../../tests/trap/syscall_test.cpp) · [开发路线与阶段验收](../plan/roadmap.md) · [Trap 开发计划](../plan/trap.md)
 
 ## 7. 用现有实验练习读代码
 
 1. **跟一次正常返回。** 执行 `make test-boot`，打开 `build/boot-test.log`，找到三条和断点有关的 DEBUG 日志。沿着 `kernel_main()` → `idt.cpp` → `trap_entry.S` → `trap_dispatch()` → `iretq` 找到每次交接发生的位置。从最后一条 `after int3` 反推 CPU 最后恢复了哪个执行地址。
 2. **区分执行地址和访问地址。** 执行 `make test-pf`，打开 `build/tests/trap-pf.log`，在 `#PF` 日志里圈出 `RIP` 和 `CR2`。和测试里打印的 `before unmapped read` 对照，确认一个对应读取指令，一个对应 `0x1000`。
 3. **观察两种内核换栈。** 执行 `make test-df`，查看第 8 号向量选用的应急栈对应的 `IST=yes`。再执行 `make test-ring3`，在 `build/tests/trap-ring3.log` 中找到 `on RSP0 stack=yes`。对照 `gdt.cpp` 找到两块栈的地址分别写到了 TSS 的哪里。 [运行命令及日志位置](getting-started.md) · [GDT 和 TSS](../../src/arch/x86_64/gdt.cpp)
-4. **跟一次系统调用往返。** 执行 `make test-syscall`，查看 `build/tests/trap-syscall.log`。找到用户程序第二次打印的位置，确认它从第一次 `sys_write` 返回后仍能执行。最后一行 `status=42` 对应内核从 `run_user_mode()` 恢复。 [用户程序自检源码](../../tests/trap/syscall_user.cpp) · [内核启动自检源码](../../tests/trap/syscall_test.cpp)
+4. **跟一次系统调用往返。** 执行 `make test-syscall`，查看 `build/tests/trap-syscall.log`。找到用户程序第二次打印的位置，确认它从第一次 `sys_write` 返回后仍能执行。`status=42` 表示第一个程序成功退出，后面的缺页日志来自第二个程序。 [用户程序自检源码](../../tests/trap/syscall_user.cpp) · [内核启动自检源码](../../tests/trap/syscall_test.cpp)
 
 读完这几段后，可以用同样的办法读新模块。先确定硬件或前一个模块会提供什么，再找 C++ 中的接口和数据，最后用可观察的日志或测试检查这条路径是否走通。
